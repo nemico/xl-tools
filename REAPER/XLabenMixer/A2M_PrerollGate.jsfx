@@ -1,0 +1,33 @@
+desc:A2M Preroll gate (master)
+//tags: utility
+//author: A2M
+// マスタートラックの FX の最後に置く。XLaben_Play の「前から再生」のとき、再生位置が開始位置（共有メモリ 90 番、秒）に
+// 来るまで音を出さない（サンプル単位）。開始位置を過ぎたら、または再生を止めたら、90 番を 0 に戻す（ふつうの再生には効かない）。
+options:gmem=A2M_LIVE
+
+@init
+ext_noinit = 1;
+was_playing = 0;
+
+@block
+playing = (play_state & 1) == 1;
+gate = gmem[90];
+(was_playing && !playing) ? (
+  gmem[90] = 0;
+  gate = 0;
+);
+was_playing = playing;
+pos0 = play_position;
+k = 0;
+
+@sample
+(gate > 0 && playing) ? (
+  (pos0 + k / srate < gate) ? (
+    i = 0;
+    loop(num_ch, spl(i) = 0; i += 1;);
+  ) : (
+    gmem[90] = 0;
+    gate = 0;
+  );
+);
+k += 1;

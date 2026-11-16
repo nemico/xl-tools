@@ -1,0 +1,557 @@
+p1:
+  data_dir: data/karaoke
+  out_dir: results/p1
+  sr: 44100
+  hop: 441
+  audio_wav:
+    decode: auto
+    sr: 44100
+    subtype: PCM_16
+  align:
+    search_min_s: -30.0
+    search_max_s: 30.0
+    local_window_bars: 8
+    local_range_s: 0.15
+    blur_sigma_s: 0.02
+    drum_weight: 2.0
+    warn_scale_dev: 0.002
+    warn_residual_s: 0.03
+    w_on: 0.5
+    w_ch: 0.5
+    margin_min: 0.5
+    second_peak_exclude_s: 0.2
+    min_overlap_ratio: 0.5
+    chroma_n_fft: 8192
+    min_onsets_per_window: 16
+    min_windows: 6
+    edge_tol_s: 0.02
+    warn_edge_ratio: 0.2
+    render_confirm_tol_s: 0.02
+    feature_bias_s: 0.01
+    midi_render_gap_warn_ms: 20
+  countin:
+    max_bars: 3
+    silence_db: 30
+  render_tool:
+    exe: 'C:\PhoenixMAX\PhoenixMain.exe'
+    base_dir: 'C:\PhoenixMAX'
+    mid_dir: 'C:\PhoenixMAX\mid'
+    wav_dir: 'C:\PhoenixMAX\wav'
+    extra_args: '-t 10'
+    latency_s: 0.0
+    w_on: 0.4
+    w_ch: 0.4
+    w_rms: 0.2
+  delay_copy:
+    min_ms: 5
+    max_ms: 80
+    jitter_ms: 10
+    match_ratio: 0.7
+  warp:
+    method: local
+    step_s: 2.0
+    win_s: 8.0
+    range_s: 0.3
+    peak_margin: 0.08
+    median_pts: 5
+    max_dev_s: 0.3
+    slope_min: 0.98
+    slope_max: 1.02
+    conf_min: 0.3
+    ok_median_ms: 20
+    ok_max_ms: 50
+    band_s: 1.0
+    median_s: 2.0
+    w_chroma: 0.7
+    w_onset: 0.3
+  render:
+    pitched_dbfs: -18
+    drum_dbfs: -12
+    peak_dbfs: -1
+    rpp_ppq: 960
+    seed: 0
+  eval:
+    onset_tol_s: 0.05
+    offset_ratio: 0.2
+    offset_min_tol_s: 0.05
+    drum_stack_window_s: 0.02
+  methods:
+    muscriptor_models: [small, medium]
+    demucs_model: htdemucs_ft
+    demucs_6s_model: htdemucs_6s
+    m4_muscriptor_model: medium
+  preprocessing_variants:
+    hpss:
+      margin: [1.0, 3.0]
+      harmonic_weight: 0.5
+    residual_leveling:
+      win_s: 1.5
+      overlap_s: 0.5
+      max_gain_db: 20.0
+    time_stretch:
+      rate: 0.5
+    frequency_bands:
+      cutoff_hz: [250.0, 1000.0, 4000.0]
+      overlap_octaves: 0.3333333333333333
+    repet:
+      candidate_periods_bars: [4, 8, 12, 16, 24, 32, 48, 64]
+  partial_tracking:
+    n_fft: 4096
+    hop: 441
+    peak_threshold_db: -60.0
+    freq_tolerance_cents: 50.0
+    max_gap_frames: 3
+    min_track_duration_s: 0.050
+    pitch_split_semitones: 0.5
+    harmonic_multiples: [2, 3, 4]
+    harmonic_tolerance_cents: 50.0
+    min_freq_hz: 27.5
+    max_freq_hz: 4186.0
+  official_pool:
+    score: A
+    # 採否は編集コストだけ。公式値は1曲抜きの平均。同じ曲で選んで測った数字は使わない。
+    # P1-43 で、格子半分と役割別の一括削除の数え方に合わせて選び直した。
+    # その他は下書きを出さない。方式の一覧は残す（外すと上限が 0 になる。削減率は 0 のまま）。
+    # ドラムは 10回すべてに残った方式が無く、空にすると 0% なので変えていない。
+    by_role:
+      melody: [M2, M6, M8, M12, M15, M17, M18, M20, M1_delim, M2_delim, M6_delim, M_dereverb]
+      bass: [M1, M2, M6, M11, M12, M13, M15, M19, M1_delim]
+      # M3 は P2-2 で、抜いてもその他 union の下がりが 0.005 未満だったので外した。
+      other: [M4, M6, M8, M10, M14, M16, M17, M20]
+      drums: [M2, M11, M14, M15, drumsep_hihat]
+    drumsep_file: drumsep_notes.json
+    draft_velocity: 100
+    drum_rep_pitch:
+      kick: 36
+      snare: 38
+      clap: 39
+      rim: 37
+      hihat: 42
+      tom: 45
+      crash: 49
+      ride: 51
+      perc: 64
+      cymbal: 52
+      other: 56
+  export_time:
+    # 下書きは解析フレーム1つ分だけ遅れていた。hop 512 / 44100Hz。
+    frame_hop_samples: 512
+    sr: 44100
+  region_edit:
+    gap_s: 2.0
+  near_miss:
+    onset_tol_s: 0.05
+    run_gap_s: 2.0
+    legato_ignore_s: 0.05
+    provisional_mono_ratio: 0.99
+    fixed_window_s: 0.25
+  edit_cost:
+    onset_tol_s: 0.05
+    quantize_tol_s: 0.30
+    run_gap_s: 2.0
+    bulk_del_min_notes: 3
+    bulk_del_gap_s: 1.0
+    empty_space_dist_s: 0.5
+  # karaoke200 の納品ファイル。Fix の中の VD+6桁 を、10曲の final.mid / audio.mp3 に対応させる。
+  delivery:
+    source_dir: karaoke200
+    vd_digits: 6
+
+p2:
+  source_dir: data/karaoke200
+  holdout_dir: data/karaoke
+  length_diff_s: 5.0
+  smf_type: 1
+  ticks_per_beat: 480
+  kick_shift_s: 0.05
+  bar_width_s: 0.1
+  content_mismatch_ratio: 0.3
+  density_iqr: 1.5
+  split:
+    train: 0.70
+    valid: 0.15
+    holdout: 0.15
+    seed: 21
+  verify:
+    methods: [M11, M15]
+    reference_n: 20
+    outlier_k: 2.0
+    seed: 21
+  timing_songs: 3
+  other_drop_keep: 0.005
+  gpu:
+    power_ratio: 0.70
+    pause_c: 80
+    resume_c: 70
+    rest_s: 30
+    check_every_songs: 20
+    outlier_k: 2.0
+  models:
+    - name: muscriptor-medium
+      repo: MuScriptor/muscriptor-medium
+      revision: f32236969308476e01fd3aae67357de5feb05a2d
+      files:
+        model.safetensors: ac80adbdf85d87231735fd948af7013441c0afced316c4e9067fd5d8a7fb97ec
+    - name: muscriptor-small
+      repo: MuScriptor/muscriptor-small
+      revision: 8c127f603b807520fa465c838e9bfee8a91ada4e
+      files:
+        model.safetensors: bbd482c786b895cf7d8f44185073d951adae2ebb8a66f82ca84cd1f84569549c
+    - name: htdemucs_ft
+      repo: adefossez/HTDemucs-ft
+      revision: d74ac89c3a1e874fc78f152555cf4d8533f06cd4
+      files:
+        04573f0d.safetensors: 68854b0d7c2b3274723b5761f6fd9f5aec5f1bcd3f0de7c1669546fdb7871b7c
+        92cfc3b6.safetensors: a241863551f30d01c42bd7b97da40839922ead3acb0f1fcab25682f55b4eeb59
+        d12395a8.safetensors: 5b01a97567ae9a3178a6236fb520251045c03eb8834bc8c24a4eec11d6c8fb56
+        f7e0c4bc.safetensors: 2c85ab3c62dd6edd8e0b965e38b16fd1cdde357cc25de6b6bc9ce7c83f60925f
+    - name: htdemucs_6s
+      repo: adefossez/HTDemucs-6s
+      revision: 3c5ee475be622df764938de97e4281a7b07ffa58
+      files:
+        5c90dfd2.safetensors: d2a1745f0744721f6b8ca5bf469b67c651ea5ed1b52998cab033b2158609d411
+    - name: yourmt3
+      repo: mimbres/YourMT3
+      repo_type: space
+      revision: 5e66c1ea173a8186e0d20432b841d3180cc015b5
+      files:
+        last.ckpt: ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25
+    - name: drumsep-6stem
+      repo: openmirlab/mdxnet-infer
+      revision: e5206b2c6f9c70ac88a7a4d2d26731e27013ec97
+      files:
+        aufr33-jarredou_DrumSep_model_mdx23c_ep_141_sdr_10.8059.ckpt: d2a4aa53eb584d21eead358a4e66d1882ad182911be018f052b5da73be9096d0
+    - name: de-limiter
+      repo: external/de-limiter
+      revision: e15f80bff475ad4216327e02bf1d8fee38e2d249
+      files:
+        all.pth: dfd91f9605c65538acabeb9d5650c21119611a9e0493de3e1f300576a9925ec9
+    - name: dereverb
+      repo: ""
+      revision: ""
+      files:
+        model_dereverb.ckpt: 9262877b87e9ebb0fb808a456b0a411fa677f5df31c8383c1254af531c078970
+
+sample_signature:
+  min_duration_s: 0.05
+  onset_offset_s: 0.150
+  window_margin_s: 0.080
+  peak_cents_tol: 50.0
+  harmonic_numbers: [1, 2, 3, 4, 5, 6]
+  stft:
+    n_fft: 4096
+    hop_length: 441
+  cqt:
+    fmin: 32.7
+    n_bins: 84
+    bins_per_octave: 12
+  nmf_components: 2
+  lgbm_n_estimators: 30
+  lgbm_max_depth: 3
+  lgbm_learning_rate: 0.1
+
+
+
+# 納品仕様の決まり（カラオケ/基本的な資料/カラオケ・データ制作要項 【仕様】 Ver4-2610、今後のMIDI制作について）
+delivery_rules:
+  ticks_per_beat: 480
+  tempo_bpm_min: 40
+  tempo_bpm_max: 210
+  setup_tick_step: 50
+  note_off_velocity: 64
+  pitch_bend_range_default: 12
+  pitch_bend_range_allowed: [2, 12, 24]
+  volume_default: 100
+  volume_min: 70
+  volume_max: 125
+  first_lyric_min_s: 4.0
+  channels:            # 1始まり
+    drums: 10
+    bass: 2
+    vocal: 4
+    vocal2: 5
+    sub_drums: 9
+  vocal:
+    volume: 80
+    velocity: 100
+    velocity_unpitched: 1
+    reverb_min: 20
+    reverb_max: 40
+    pan: 64
+    octave_shift: 12
+    tick_unit: 10
+  chorus:
+    volume: 100
+    expression: 80
+    velocity: 100
+    patch: [8, 3, 54]   # MSB / LSB / PC(1始まり)
+    cutoff: 50
+  bass:
+    velocity: 100
+    reverb: 0
+    chorus: 0
+    pan: 64
+  drums:
+    kick_pan: 64
+    snare_pan: 64
+    kick_reverb: 0
+    kick_chorus: 0
+    snare_chorus: 0
+    decay_max: 66
+    forbidden_programs: [2, 50]   # PC(1始まり)
+  forbidden_time_signatures: ["3/2", "6/4", "12/8"]
+  allowed_cc: [0, 1, 5, 6, 7, 10, 11, 32, 64, 65, 67, 71, 72, 73, 74, 75, 84, 91, 93, 94, 98, 99, 100, 101, 120, 123, 126, 127]
+  cc64_allowed_families: [piano]
+  forbidden_efx: ["2 Pitch Shifter", "3D Auto", "3D Manual", "Fb P.Shifter", "Humanizer", "Keyboard Multi", "Lo-Fi 2", "Bass Multi", "Step Flanger", "Hexa Chorus", "Space D", "Tm Ctrl Delay", "Gate Reverb", "3D Chorus", "3D Delay"]
+
+# M0: セットアップ表
+m0:
+  source_dir: data/karaoke200
+  out_dir: results/m0
+  chorus_name_keys: ["chorus", "cho"]
+  vocal2_name_keys: ["vocal"]
+
+# M1: テンポマップ
+m1:
+  out_dir: results/m1
+  audio_dir: data/karaoke200
+  gt_bar_dir: results/gt_bars   # 納品MIDIの小節頭を音源の秒に直したもの（bar_times.npy）
+  split_csv: results/p2/分割.csv
+  beat_checkpoint: final0
+  device: cuda
+  drift_tol_s: 0.035        # グリッドと原曲のずれの許容。超える前にBPMを変える
+  constant_tol_s: 0.03     # テンポ一定かどうかを見るときの許容
+  main_ratio: 0.8          # 曲の主なBPMで、最良のBPMのこの割合以上進めるなら主なBPMを使う
+  constant_share: 0.9      # 拍のこの割合以上が1つの整数BPMのグリッドに乗れば、テンポ一定とみなす
+  patience_beats: 4        # グリッドから外れた拍がこの数続いたらBPMを変える
+  local_span_beats: 8      # その場のテンポを見る幅（拍）
+  bar_min_run: 6           # 小節頭の位置がこの小節数つづけて同じなら、その位置を信じる
+  search_bpm: 3            # その小節のテンポの前後、何BPMまで候補にするか
+  downbeat_match_tol_s: 0.05
+  smooth_window_beats: 9   # 拍の時刻をならす幅（拍）
+  smooth_max_dev_ratio: 0.25
+  eval_ok_s: 0.05          # 小節頭がこれ以内なら合っている
+  template: 260603x.rpp     # Reaper のテンプレート
+  media_dir: Media file
+  project_sr: 44100
+  mix_track_index: 1        # テンプレートで原曲を置くトラック（0始まり。2MIX）。分離した音はその次から
+  stems: [drums, bass, other, vocals]
+  first_iid: 90001
+  silence_db: -45.0         # 最大の音量からこれだけ下がった所を「音の鳴り始め」とする
+  silence_frame_s: 0.02
+  bar_eps_s: 0.03           # 鳴り始めが小節頭からこれ以内なら、小節頭から始まるとみなす
+  lead_bars: 3              # セットアップ小節（M1）の後ろに足す空きの小節。打ち込み中に音色やドラムキットを入れ替える余裕。納品のときは詰める
+  onset_hop: 64             # 立ち上がりを測る刻み（44.1kHz で約1.5ms）
+  onset_n_fft: 1024
+  onset_delta: 0.15
+  onset_min_gap_s: 0.08
+  refine:                   # 粗いグリッドを、ドラムの立ち上がりに合わせ直す
+    windows_s: [0.06, 0.03]   # グリッドの前後、どこまでの立ち上がりを見るか（1回目、2回目）
+    window_ratio: 0.25        # ただし1拍の長さのこの割合まで
+    strength_quantile: 0.5    # 立ち上がりのうち、強いほうの半分だけ使う
+    bpm_margin: 3
+    free_s: 0.004             # このずれまでは「合っている」とみなす
+    cost_bar_s: 0.02          # テンポ変更1回は、ずれ何秒ぶんに相当するか（小節頭）
+    cost_beat_s: 0.04         # 同（小節頭以外）
+    drift_max_s: 0.08
+    bin_s: 0.0005
+  metric:                   # グリッドの合い方の数え方（2026-11-13 に決めた。ドラムの立ち上がりとの差）
+    window_s: 0.04            # グリッドの前後この範囲の立ち上がりを数える
+    strength_quantile: 0.5
+    block_s: 10.0             # この長さごとに、ずれの中央値を取る
+    block_min_count: 5
+    ok_s: 0.010               # どの区切りでも中央値がこれ以内なら「合っている」
+
+# 音源分離（BS-RoFormer SW 6ステム。BSRoformer.cpp の CLI。パスはPCごとに書き換える）
+separation:
+  cli: models/bsformer/bin/windows-x64/bs_roformer-cli.exe   # 配布：A2M フォルダからの相対
+  model: models/bsformer/models/BS-RoFormer-SW-6stem-q8_0.gguf   # 配布：A2M フォルダからの相対
+  stem_order: [bass, drums, other, vocals, guitar, piano]   # モデルが出す順
+  sr: 44100
+  overlap_listen: 8         # 人が聴くプロジェクト用。Reaper のマクロの既定（画面で選べる）
+  overlap_choices: [2, 4, 8, 16]   # マクロの画面で選べる重ねの数（大きいほど分離はきれいで、時間は比例して長い）
+  overlap_batch: 2          # 全曲をまとめて回すとき
+  default_layout: "6"
+  layouts:
+    "4":      {drums: [drums], bass: [bass], other: [other, guitar, piano], vocals: [vocals]}
+    "piano":  {drums: [drums], bass: [bass], piano: [piano], other: [other, guitar], vocals: [vocals]}
+    "guitar": {drums: [drums], bass: [bass], guitar: [guitar], other: [other, piano], vocals: [vocals]}
+    "6":      {drums: [drums], bass: [bass], guitar: [guitar], piano: [piano], other: [other], vocals: [vocals]}
+  stems_dir: results/stems
+  work_dir: results/tmp_sep
+  keep: {drums: 44100, bass: 22050, vocals: 22050}   # 全曲ぶん残すステムと、そのサンプリング周波数（モノラル）
+
+# M3: ミックスの初期値
+m3:
+  out_dir: results/m3
+  work_root: D:/A2M_work        # 大きい作業ファイルの置き場（Cドライブの空きが少ないため）
+  midi_dir: data/karaoke200
+  gt_bar_dir: results/gt_bars
+  render_timeout_s: 600
+  neutral: {7: 100, 11: 100, 10: 64, 91: 0, 93: 0, 94: 0}   # 1本ずつ鳴らすときにそろえる値（CC番号: 値）
+  sr: 22050
+  n_fft: 2048
+  hop: 1024
+  n_mels: 32
+  block_frames: 4               # 約0.19秒ごとにまとめる
+  silent_db: -60.0              # 一番大きい所からこれより小さいトラックは「鳴っていない」
+  min_gain_db: -40.0
+  house_min_count: 3            # 過去の値の中央値を使うのに必要な例の数
+  efx_min_rate: 0.5             # その音色の過去のトラックのこの割合以上で EFX を使っていたら、EFX を提案する
+  pan_center_width: 8           # パンが 64±これ以内なら「中央」と数える
+
+# M4: ドラム・ベース・歌メロの下書き（MuScriptor を納品データで追加学習）
+m4:
+  work_root: models/m4   # 配布：下書きの重み（models/m4/ckpt）
+  data_name: data_v2             # 学習・検証データのフォルダ名（<work_root>/<data_name>/<用途>）
+  out_dir: results/m4
+  midi_dir: data/karaoke200
+  gt_bar_dir: results/gt_bars
+  model_size: medium          # 検証曲で small と比べて決めた（2026-11-14）
+  sr: 16000
+  segment_s: 5.0
+  frame_rate: 100
+  parts:                      # 分離音ごとの、モデルに渡す楽器名と、納品側の役割
+    drums:  {instrument: drums, roles: [drums]}
+    bass:   {instrument: electric_bass, roles: [bass]}
+    vocals: {instrument: voice, roles: [melody, melody2]}
+  drum_pitch: {kick: 36, side_stick: 37, rim: 37, snare: 38, clap: 39, hihat: 42, tom: 45, crash: 49, ride: 51, cymbal: 52, perc: 60}
+  drum_detail:                # このクラスは、納品の音高が GM の範囲なら音高ごと学習する（ハイハットの開閉、タムの高さなど）
+    classes: [hihat, tom, crash, ride, cymbal, perc, side_stick, rim]
+    min: 35
+    max: 81
+  drum_stack_s: 0.02          # 同じクラスの重ねを1打にまとめる幅
+  bass_extra:                 # ベース本体以外で、ベースの正解に足すトラック（本体が休んでいる所だけ）
+    name_keys: [bass]
+    gap_s: 0.05
+  melody_shift: 0             # 歌メロは納品に書かれた音高のまま学習する（モデルの出力も納品の音高と同じオクターブで出る。2026-11-14 に確認）
+  offset_window_s: 0.05       # 位置合わせの微調整で見る幅
+  min_notes: 8                # その役割のノートがこれ未満の曲は、そのパートを学習に使わない
+  train:
+    batch: 4                  # medium（3億パラメータ）が 8GB に入る大きさ
+    lr: 2.0e-5
+    weight_decay: 0.01
+    warmup_steps: 200
+    grad_clip: 1.0
+    max_tokens: 1200
+    eval_every: 500
+    seed: 0
+    temp_pause_c: 80          # GPU がこの温度を超えたら学習を休む
+    temp_resume_c: 70         # この温度まで下がったら再開
+    temp_check_steps: 50
+    temp_wait_s: 20
+    aug_gain_db: 6.0          # 学習のとき、音量を ±この dB の範囲でランダムに変える
+    aug_speed_semitones: 0    # 使っていない（仮説を確かめたら違った。2026-11-15 の MEMORY.md）。学習のとき、再生の速さを -n〜+n 半音（1半音 = 約6%）からランダムに変える。0 で変えない（runm まで）。モデルが覚えたテンポで書く癖を防ぐため
+    context_jitter: {prob: 0.5, max_steps: 2}   # 学習のとき、モデルが読む側の時刻のトークンを、半分の確率で ±1〜2 刻み（10〜20ms）動かす。答えは動かさない。前に書いた音から時刻を決める癖を弱めるため（2026-11-15、runm4）
+  eval_tol_s: 0.05
+  cost_tol_ticks: 10          # 手数を数えるとき、同じ位置とみなす幅（tick）
+  draft:                      # Reaper に入れる下書きMIDI
+    ckpt: runm4               # 採用した重み（2026-11-15。学習のとき読む側の時刻のトークンをずらした runm4。前は runm）
+    quantize: false           # 下書きをグリッドにそろえるか。人の判断で、そろえずにモデルの出した位置のまま出す（2026-11-15）
+    grids: [4, 3]             # quantize: true のときに、音の始まりをそろえるグリッド（1拍を4等分か3等分。拍ごとに合うほう）
+    stagger:                  # 区切りの位置をずらして何回か採譜し、それぞれの区切りの前のほう（時刻が正確）の音だけを合わせる
+      passes: 2                      # 1 = ずらさない（1回）。2 = 2.5秒ずらしてもう1回（時間は2倍）
+      parts: [bass, vocals]          # 検証26曲の 20ms の F値（1次式だけと比べて）：ベース +0.029、歌 +0.028。ドラムは −0.004 なので入れない
+      chunk_s: 5.0                   # MuScriptor が音を区切る長さ
+      keep_from_s: 0.0               # 区切りの何秒目から取るか
+      dedupe_s: 0.03                 # 境目で同じ音高の音がこれより近く2つ来たら1つにする
+    chunk_offset:             # MuScriptor の5秒の区切りごとの時刻の癖を、16分の線を目安に引く（クオンタイズではない。区切りの中の位置関係は変えない）
+      enabled: false                 # 16分でクオンタイズしたあとの F値はほぼ変わらない（ドラム +0.000、ベース +0.002、歌 +0.004。2026-11-15）ので止めた
+      parts: [drums, bass, vocals]   # 引くパート（検証曲で決める）
+      chunk_s: 5.0                   # MuScriptor が音を区切る長さ
+      grid_div: 4                    # 4分音符を何等分した線を目安にするか（4 = 16分）
+      window_s: 0.03                 # 線からこれより近い音だけで、区切りのずれを測る（3連符などは入らない）
+      min_matches: 4                 # 区切りの中で線に近い音がこれより少なければ、その区切りは動かさない
+      fit: linear                    # 検証26曲で linear が offset より良かった（20ms の F値：ドラム +0.006、ベース +0.031、歌 +0.023）。offset = 区切りごとに一定の量を引く / linear = 区切りの中で時刻の1次式（伸び縮みも取る）
+      linear_min_matches: 12         # linear のとき、線に近い音がこれだけ無い区切りは一定の量にする
+    min_len_ticks: 30
+    drum_len_ticks: 60
+    drum_velocity: 100
+    item_prefix: AI下書き        # プロジェクトに入れる MIDI アイテムの名前の頭
+    guide_melody:             # 歌メロ（納品MIDI 80曲で測った形。位置は10tickの倍数が99.6%、隙間0が80%、1〜60tickの隙間は1.4%）
+      legato_max_gap_ticks: 60
+      min_len_ticks: 40
+    tracks:                   # 分離音: [トラック名, チャンネル]
+      drums: ["A10R Drums", 10]
+      bass: ["A02  Bass", 2]
+      vocals: ["A04  Vocal", 4]
+
+# コピペ候補（同じ小節の繰り返しを見つける）
+repeats:
+  work_dir: D:/A2M_work/repeats
+  sr: 22050
+  hop: 256
+  n_fft: 1024
+  n_mels: 40
+  cqt_fmin: C1
+  cqt_bins: 84
+  log_gain: 1000.0
+  slots_per_beat: 4         # 小節を拍の 1/4 ずつに区切って比べる
+  active_db: 35.0           # パートの一番大きい小節からこれ以上小さい小節は「鳴っていない」
+  min_run: 4                # これ以上続く範囲だけ候補にする
+  # 閾値は学習曲で「減った手数」（コピペ後に直す音を引いた、ゼロから打つより減る音の数）が一番大きくなる値（2026-11-15）
+  same_score: 0.90          # 範囲の相関の平均がこれ以上なら「同じ」、未満なら「ほぼ同じ」と表示する
+  sweep_thresholds: [0.50, 0.60, 0.70, 0.75, 0.80, 0.85]
+  groups:                   # 分離音: 比べ方、正解に使う納品の役割、表示名、閾値
+    drums:   {kind: drums,   roles: [drums, sub_drums], label: ドラム, threshold: 0.80}
+    bass:    {kind: pitched, roles: [bass],             label: ベース, threshold: 0.75}
+    vocals:  {kind: pitched, roles: [vocal, vocal2],    label: 歌メロ, threshold: 0.50}
+    uwamono: {kind: pitched, roles: [other],            label: 上モノ, threshold: 0.60}
+
+# コード（拍ごとの根音とメジャー/マイナー）
+chords:
+  work_dir: D:/A2M_work/chords
+  sr: 22050
+  hop: 512
+  silent_db: 40.0            # 一番大きい所からこれ以上小さい拍は「鳴っていない」
+  qualities: [maj, min]
+  accomp_roles: [other]      # 正解のコードを決めるのに使う納品の役割（ベースは別に使う）
+  truth_bass_bonus: 0.3      # 正解を決めるとき、ベースの音を根音とするコードに足す点
+  truth_min_weight: 0.5      # 拍の中の音の重みの合計がこれ未満なら「コード無し」
+  no_chord_level: 0.3
+  bass_weights: [0.0, 0.1, 0.2, 0.3, 0.5, 0.8]
+  switch_penalties: [0.0, 0.2, 0.4, 0.6, 1.0]
+  bass_weight: {stem: 0.5, draft: 0.2, human: 0.2}   # 学習曲で決めた（draft は human と同じ値を使う。学習曲には下書きが無いため）
+  switch_penalty: {none: 0.0, stem: 0.0, draft: 0.2, human: 0.2}
+  draft_runs: {検証: runm, 最終確認: runm_final}       # AIのベースの下書き（M4 の評価で保存した出力）
+
+# プロジェクトに入れるコード（リージョンと、構成音を塗りつぶした「コード」トラック）
+annotate:
+  bass_hint: draft             # コード認識に入れるベース（draft: AIのベースの下書き / none）。検証曲で決める
+  snap_ticks: 240              # コードの区間の頭と終わりを、8分音符にそろえる
+  chord_track_name: コード
+  chord_track_before: Other TEMPLATE   # このトラックの上に入れる（17トラックの外。人の指定 2026-11-15）
+  chord_channel: 16
+  fill_low: 21                 # 塗りつぶす鍵盤の範囲（A0〜C8）
+  fill_high: 108
+  fill_velocity: 64
+
+# コード認識（lv-chordia、ISMIR 2019 の大語彙モデル）に、分かっているベースを入れる
+lvchord:
+  work_dir: D:/A2M_work/lvchord
+  inputs: [mix, novocal]           # 学習曲で比べる入力（原曲そのまま / 原曲 − 歌の分離音）
+  dicts: [submission, full]        # lv-chordia のコード辞書
+  bass_weights: [0.5, 0.8, 1.0]    # ベースの確率を差し替える強さ
+  input: novocal                   # 学習曲40曲で決めた（2026-11-15）
+  dict: submission
+  bass_weight: 0.8
+  truth:                           # 納品MIDIから正解のコードを付けるときの決まり
+    min_weight: 0.5                # 拍の中の音の重み（鳴っている拍数）の合計がこれ未満なら「コード無し」
+    present_ratio: 0.15            # 一番重い音名のこの割合未満の音名は「鳴っていない」とみなす
+    outside_cost: 0.6              # コードの外の音の重み1あたりの減点
+    missing_cost: 0.5              # 鳴っていない構成音1つあたりの減点（重みの合計に対する割合）
+    tone_cost: 0.03                # 4和音を選ぶときの減点（同点なら3和音にする）
+    bass_root_bonus: 0.2           # ベースの音が根音のとき
+    bass_tone_bonus: 0.05          # ベースの音が根音以外の構成音のとき（転回形）
+
+# Reaper のマクロ（scripts/ai_build_project.lua）
+reaper:
+  job_dir: scratch/reaper_job      # 依頼と結果をやりとりするフォルダ（リポジトリからの相対。英数字だけのパスにする）
+  stems_subdir: AI_stems           # ステムを書き出す場所（プロジェクトの録音フォルダの中）
+
+# 配る（scripts/make_dist.py）。コードは GitHub の「配る用のリポジトリ」に上げ、受け取る人は XLaben_Update.lua で入れる・更新する
+dist:
+  repo: nemico/xl-tools                 # 配る元（GitHub の owner/name）。XLaben_Update.lua に書き込まれる
+  branch: main
+  release_dir: ../XLabenTools-release   # 配るファイルだけを置く git リポジトリ（このリポジトリからの相対）
+  tools_dir: ..                         # REAPER のツール（XLabenMixer・EFXUI・DrumReapermacro）があるフォルダ（同じく相対）

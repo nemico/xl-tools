@@ -1,0 +1,7 @@
+REAPER/XLabenMixer/XLaben_Mixer.lua	ミキサー
+REAPER/XLabenMixer/XLaben_Play.lua	再生・停止（Space に割り当てる）
+REAPER/XLabenMixer/XLaben_Sync.lua	先に送っておく（ミキサー・Space で自動で起動する）
+REAPER/EFXUI/xlaben_efx_controller.lua	EFX
+REAPER/DrumReapermacro/XLaben_Drum.lua	ドラム
+A2M/scripts/ai_build_project.lua	AI でプロジェクトを作る（下書き）
+XLaben_Update.lua	インストール・更新

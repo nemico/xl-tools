@@ -1,0 +1,243 @@
+desc:A2M Live MIDI preview (X-Laben)
+//tags: MIDI utility
+//author: A2M
+// X-Laben トラックの PhoenixMAX の前（FX の先頭）に置く。
+// 1. ミキサー・再生・EFXUI のスクリプトから共有メモリ（gmem "A2M_LIVE"）で渡された CC・SysEx を音源へ送る（MIDI アイテムは作らない）。
+//    メッセージごとに「送る前に待つ時間」を持てるので、音源が受け取りきれるように間をあけて送れる。
+// 2. トラックに来る MIDI は通す（ノートはいつも通す）。ただし
+//    ・止まっている間（一時停止も）は、トラックから来るチャンネルのメッセージ（CC・プログラム・プレッシャー・ピッチベンド）を通さない。
+//      来るのは REAPER が停止のときに送るリセット（CC7 = 127、CC11 = 127、CC91 = 0、バンク = 0、CC6 = 0 など）だけで、
+//      通すと鳴っている音が急に大きくなり、音源の設定も変わってしまうため（2026-11-15 の記録で確かめた）。
+//    ・再生を始めた最初のブロックの頭（位置 0）に来るチャンネルのメッセージは通さない。REAPER が自分で送り直す値
+//      （バンク・プログラム・CC7/10/11/91/93/94、選択の無い CC6 など）で、再生のスクリプトが送った状態を上書きし、
+//      ドラムのキットの設定などを崩すため。開始位置ちょうどの出来事は、再生のスクリプトが先に送っている。
+//    ・CC121（コントローラーのリセット）は通さない。納品の決まり（使ってよい CC）に 121 は無いので、データには出てこない。
+//      来るのは REAPER が停止・一時停止のときに送るリセットだけで、通すと鳴っている音の Expression が 127 に戻り、急に大きくなるため。
+//      （音を止める CC120 / 123 は通す）
+//    ・ミキサーでつまんでいる間だけ、その CC は通さない。
+// 3. 音源に入ったものを覚える（再生のとき、違うものだけを送るため）：
+//    ふつうの CC は、チャンネルと番号ごとに最後の値。
+//    RPN / NRPN は、選んでいるもの（チャンネルごと）と、決まったパラメーターの値を覚える：
+//      NRPN の MSB 1（ビブラート・フィルター・エンベロープなど）と MSB 24〜31（ドラムの音ごとのピッチ・レベル・パン・送り）、
+//      RPN の 0〜2（ピッチベンドの幅・チューニング）の、データエントリ（CC6）の値。
+//      プログラムチェンジが入ったら、そのチャンネルのドラムの値（MSB 24〜31）は分からない（-1）に戻す（キットを変えると既定に戻るため）。
+//      CC121 が入ったら、選んでいるものは「なし」（RPN 127 / 127）にする。
+//    それ以外（SysEx、プログラム、バンク、ほかの RPN/NRPN の値、CC38・96・97、モードの CC、チャンネルプレッシャー）は
+//    「入った数」だけ数える（ひとつでも入れば、次の再生では全部を送り直す）。
+//    音を止めるだけの CC120 / 123 は数えない。CC121（コントローラーのリセット）は、戻る CC を既定に戻す。
+//    音源全体のリセット（SysEx）が入ったら、CC の表を「リセットのあとの既定のまま」（-1）に戻す。
+// 共有メモリ（番号）：
+//   0 スクリプトが書いた数 / 1 ここで送った数 / 2 動いている印（ブロックごとに +1）/ 4 版
+//   6 ふつうの CC 以外が音源に入った数 / 9 この JSFX が始まった印（読み直されると変わる。再生を始めても変わらない：ext_noinit）
+//   8、10〜40 使わない（前の版のミュート・ソロ。ここに何が残っていても関係ない）
+//   48〜63 最後のノートオンのベロシティ / 64〜79 ノートオンの数
+//   80 つまんでいるチャンネル（1〜16、0 = なし）/ 81 その CC 番号
+//   90 前から再生するときの開始位置（秒、0 = なし）：再生中、これより前のノートオンは通さない（前の音が鳴り残らないように）。
+//      マスタートラックの A2M Preroll gate が、開始位置まで音を出さず、過ぎたら 0 に戻す
+//   128 から：送るメッセージ。1件 72 個（長さ、送る前に待つミリ秒、続いてバイト）。4096 件で一回り
+//   300000 から：CC の表（チャンネル 0〜15 × 128。値、-1 = リセットのあとの既定のまま）
+//   500000 から：NRPN の値（(チャンネル × 9 + 枠) × 128 + LSB。枠 0 = MSB 1、1〜8 = MSB 24〜31。-1 = 分からない）
+//   520000 から：RPN の値（チャンネル × 3 + LSB 0〜2）/ 521000 から：選んでいるもの（チャンネル × 3：種類 1 = RPN・2 = NRPN、MSB、LSB。
+//      リセットのあとは「なし」= RPN 127 / 127）
+//   400000 から：記録（調べる用）。400000 = 書いた数、そのあと 1件 8 個 × 4096 件で一回り：
+//     出どころ（1 = トラック、2 = スクリプト、3 = トラックから来たが止めた）、再生中か（play_state）、位置（秒）、長さ、バイト 4 つ
+//     ノート（8x / 9x）は記録しない
+options:gmem=A2M_LIVE
+in_pin:left
+in_pin:right
+out_pin:left
+out_pin:right
+
+@init
+// 再生を始めるたびに @init をやり直さない（やり直すと、音源に入ったものの記録が消え、毎回全部を送り直すことになる）
+ext_noinit = 1;
+VERSION = 12;
+was_playing = 0;
+first_block = 0;
+LOG = 400000;
+BASE = 128;
+SLOTS = 4096;
+SLOT = 72;
+CCB = 300000;
+NRB = 500000;
+RPB = 520000;
+SELB = 521000;
+buf = 0;      // 送るメッセージ（0〜71）
+inb = 1024;   // 受けたメッセージ
+waiting = 0;
+armed = 0;
+gmem[4] = VERSION;
+gmem[6] = 0;
+gmem[9] = floor(time_precise() * 1000) % 1000000000 + 1;
+gmem[80] = 0;   // つまんでいる CC は、読み込んだときには無い
+gmem[81] = 0;
+
+function clear_cc() local(i) (
+  i = 0;
+  loop(2048, gmem[CCB + i] = -1; i += 1;);
+);
+
+// RPN / NRPN の値を「分からない」に、選んでいるものを「なし」（RPN 127 / 127。GS のリセットのあとと同じ）にする
+function clear_params() local(i) (
+  i = 0;
+  loop(16 * 9 * 128, gmem[NRB + i] = -1; i += 1;);
+  i = 0;
+  loop(48, gmem[RPB + i] = -1; i += 1;);
+  i = 0;
+  loop(16, gmem[SELB + i * 3] = 1; gmem[SELB + i * 3 + 1] = 127; gmem[SELB + i * 3 + 2] = 127; i += 1;);
+);
+
+// 覚える NRPN の枠（MSB 1 → 0、24〜31 → 1〜8、ほか → -1）
+function nrpn_slot(msb) (
+  msb == 1 ? 0 : (msb >= 24 && msb <= 31) ? msb - 23 : -1;
+);
+
+// 今選んでいるパラメーターの値を置く場所（覚えないものなら -1）
+function param_index(ch) local(mode, msb, lsb, slot) (
+  mode = gmem[SELB + ch * 3];
+  msb = gmem[SELB + ch * 3 + 1];
+  lsb = gmem[SELB + ch * 3 + 2];
+  slot = nrpn_slot(msb);
+  (mode == 2 && slot >= 0 && lsb >= 0) ? NRB + (ch * 9 + slot) * 128 + lsb :
+  (mode == 1 && msb == 0 && lsb >= 0 && lsb <= 2) ? RPB + ch * 3 + lsb : -1;
+);
+
+// 音源全体のリセットか（X-Laben / GS の 40 00 7F、システムモード 00 00 7F、Roland GS リセット、GM システムオン）
+function is_reset(b, len) (
+  (len >= 11 && b[1] == 0 && b[2] == 0x40 && b[3] == 4 && b[4] == 1 && b[5] == 0x58 && b[6] == 0x12 &&
+     (b[7] == 0x40 || b[7] == 0) && b[8] == 0 && b[9] == 0x7F) ||
+  (len >= 10 && b[1] == 0x41 && b[3] == 0x42 && b[4] == 0x12 && b[5] == 0x40 && b[6] == 0 && b[7] == 0x7F) ||
+  (len >= 5 && b[1] == 0x7E && b[3] == 9);
+);
+
+// 音源に入るメッセージを覚える
+function observe(b, len) local(st, kind, ch, n, k, i) (
+  st = b[0];
+  st == 0xF0 ? (
+    gmem[6] += 1;
+    is_reset(b, len) ? (clear_cc(); clear_params(););
+  ) : (
+    kind = st & 0xF0;
+    ch = st & 0x0F;
+    (kind == 0xB0 && len >= 3) ? (
+      n = b[1];
+      (n == 120 || n == 123) ? (
+        0;  // 音を止めるだけ（設定は変わらない。停止のときに REAPER が送ることがある）
+      ) : n == 121 ? (
+        // コントローラーのリセット：モジュレーション・エクスプレッション・ペダルが既定に戻る（ボリューム・パン・送りは変わらない）
+        gmem[CCB + ch * 128 + 1] = -1;
+        gmem[CCB + ch * 128 + 11] = -1;
+        gmem[CCB + ch * 128 + 64] = -1;
+        gmem[CCB + ch * 128 + 65] = -1;
+        gmem[CCB + ch * 128 + 66] = -1;
+        gmem[CCB + ch * 128 + 67] = -1;
+        gmem[SELB + ch * 3] = 1;      // 選んでいるものは「なし」
+        gmem[SELB + ch * 3 + 1] = 127;
+        gmem[SELB + ch * 3 + 2] = 127;
+      ) : (n == 99 || n == 98) ? (
+        gmem[SELB + ch * 3] = 2;
+        gmem[SELB + ch * 3 + (n == 99 ? 1 : 2)] = b[2];
+      ) : (n == 101 || n == 100) ? (
+        gmem[SELB + ch * 3] = 1;
+        gmem[SELB + ch * 3 + (n == 101 ? 1 : 2)] = b[2];
+      ) : n == 6 ? (
+        k = param_index(ch);
+        k >= 0 ? (gmem[k] = b[2]) : (gmem[6] += 1);
+      ) : (n == 0 || n == 32 || n == 38 || n == 96 || n == 97 || n >= 124) ? (
+        gmem[6] += 1;
+      ) : (
+        gmem[CCB + ch * 128 + n] = b[2];
+      );
+    ) : kind == 0xC0 ? (
+      gmem[6] += 1;
+      // キットを変えると、ドラムの音ごとの設定は既定に戻る
+      i = 0;
+      loop(8 * 128, gmem[NRB + (ch * 9 + 1) * 128 + i] = -1; i += 1;);
+    ) : kind == 0xD0 ? (
+      gmem[6] += 1;
+    );
+  );
+);
+
+// 音源に入るもの（入らなかったもの）を記録する（ノートは記録しない）
+function log_msg(src, b, len) local(k, e) (
+  ((b[0] & 0xF0) != 0x80 && (b[0] & 0xF0) != 0x90) ? (
+    k = gmem[LOG];
+    e = LOG + 1 + (k % 4096) * 8;
+    gmem[e] = src;
+    gmem[e + 1] = play_state;
+    gmem[e + 2] = play_position;
+    gmem[e + 3] = len;
+    gmem[e + 4] = b[0];
+    gmem[e + 5] = len > 1 ? b[1] : -1;
+    gmem[e + 6] = len > 2 ? b[2] : -1;
+    gmem[e + 7] = len > 3 ? b[3] : -1;
+    gmem[LOG] = k + 1;
+  );
+);
+
+clear_cc();
+clear_params();
+
+@block
+gmem[2] += 1;
+playing = (play_state & 1) == 1;   // 1 = 再生、5 = 録音（2 = 一時停止、0 = 停止）
+first_block = playing && !was_playing;
+was_playing = playing;
+
+// 1. 頼まれたメッセージを、待ち時間を守って送る（同じ位置のトラックの MIDI より前に音源へ届く）
+w = gmem[0];
+r = gmem[1];
+r > w ? (r = w; armed = 0;);
+pos = 0;
+while (r < w && pos < samplesblock) (
+  s = BASE + (r % SLOTS) * SLOT;
+  !armed ? (
+    waiting = floor(max(0, gmem[s + 1]) * srate / 1000);
+    armed = 1;
+  );
+  waiting > 0 ? (
+    step = min(waiting, samplesblock - pos);
+    waiting -= step;
+    pos += step;
+  );
+  (waiting <= 0 && pos < samplesblock) ? (
+    len = gmem[s];
+    (len > 0 && len < SLOT - 1) ? (
+      i = 0;
+      loop(len, buf[i] = gmem[s + 2 + i]; i += 1;);
+      midisend_buf(pos, buf, len);
+      observe(buf, len);
+      log_msg(2, buf, len);
+    );
+    r += 1;
+    armed = 0;
+  );
+);
+gmem[1] = r;
+
+// 2. トラックに来た MIDI を通す（つまんでいる CC だけ止める）。ノートオンのベロシティを覚える（メーター用）
+while ((len = midirecv_buf(ofs, inb, 1000)) > 0) (
+  pass = 1;
+  st = inb[0] & 0xF0;
+  ch = inb[0] & 0x0F;
+  (len == 3 && st == 0xB0 && inb[1] == 121) ? pass = 0;
+  // 止まっている間のリセットと、再生の頭に REAPER が送り直すものは通さない（ノートは通す）
+  (st >= 0xA0 && st <= 0xE0 && (!playing || (first_block && ofs == 0))) ? pass = 0;
+  // ただし音を止める CC120 / 123 はいつも通す（音が鳴りっぱなしにならないように）
+  (len == 3 && st == 0xB0 && (inb[1] == 120 || inb[1] == 123)) ? pass = 1;
+  // 前から再生するとき、開始位置より前のノートオンは通さない
+  (gmem[90] > 0 && playing && len == 3 && st == 0x90 && inb[2] > 0 && play_position + ofs / srate < gmem[90] - 0.0005) ? pass = 0;
+  (len == 3 && st == 0xB0 && gmem[80] == ch + 1 && gmem[81] == inb[1]) ? pass = 0;
+  (len == 3 && st == 0x90 && inb[2] > 0) ? (
+    gmem[48 + ch] = inb[2];
+    gmem[64 + ch] += 1;
+  );
+  pass ? (
+    midisend_buf(ofs, inb, len);
+    observe(inb, len);
+    log_msg(1, inb, len);
+  ) : (
+    log_msg(3, inb, len);
+  );
+);
