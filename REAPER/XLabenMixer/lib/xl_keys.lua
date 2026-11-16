@@ -66,6 +66,7 @@ M.KINDS = {
     mixer = {"xlaben_mixer.lua"},
     drum = {"xlaben_drum.lua", "sc_drum_macro.lua"},
     efx = {"xlaben_efx_controller.lua"},
+    strum = {"xlaben_strum.lua", "strumeditor_v2.lua"},   -- オートストラマー（前の名前 StrumEditor_V2.lua）
 }
 
 -- text（reaper-kb.ini）から、ファイル名が files のどれかのスクリプトのコマンドの名前（"_RS…"）の集合
