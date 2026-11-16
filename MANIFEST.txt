@@ -101,13 +101,12 @@
 21243	-	A2M/scripts/delivery_check.lua
 6056	-	A2M/scripts/reaper_backend.py
 1068	-	actions.txt
-4388	-	CHANGES.txt
-5739	-	README.txt
+5583	-	CHANGES.txt
+5737	-	README.txt
 6302	-	REAPER/AutoStrummer/lib/strum_core.lua
 6390	-	REAPER/AutoStrummer/lib/strum_store.lua
 3986	-	REAPER/AutoStrummer/lib/strum_take.lua
-402	-	REAPER/AutoStrummer/StrumEditor_V2.lua
-22222	-	REAPER/AutoStrummer/XLaben_Strum.lua
+25091	-	REAPER/AutoStrummer/XLaben_Strum.lua
 160526	-	REAPER/DrumReapermacro/data/drum_names.lua
 16189	-	REAPER/DrumReapermacro/lib/drum_block.lua
 10242	-	REAPER/DrumReapermacro/lib/drum_io.lua
@@ -143,4 +142,4 @@
 3694	-	REAPER/XLabenUI/lib/pf_db.lua
 4555	-	REAPER/XLabenUI/lib/pf_setup.lua
 33859	-	REAPER/XLabenUI/XLaben_PatchFinder.lua
-52931	-	XLaben_Update.lua
+57605	-	XLaben_Update.lua

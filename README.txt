@@ -5,7 +5,7 @@
   ・再生・停止（REAPER\XLabenMixer\XLaben_Play.lua。Space に割り当てる。送り終わって音源が落ち着いてから再生する）
   ・EFX（REAPER\EFXUI\xlaben_efx_controller.lua）
   ・ドラム（REAPER\DrumReapermacro\XLaben_Drum.lua）
-  ・オートストラマー（REAPER\AutoStrummer\StrumEditor_V2.lua）
+  ・オートストラマー（REAPER\AutoStrummer\XLaben_Strum.lua）
   ・AI でプロジェクトを作る（A2M\scripts\ai_build_project.lua。テンポマップ・ステム・ドラム/ベース/歌の下書き・コード）
   ・納品チェック（A2M\scripts\delivery_check.lua。R02Checker で確かめて、引っかかった所にマーカーを置く）
   ・インストール・更新（XLaben_Update.lua）

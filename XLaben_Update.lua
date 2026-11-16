@@ -1,5 +1,5 @@
 -- @description X-Laben ツール：インストール・更新
--- @version 4.0
+-- @version 5.0
 --
 -- これ 1 つで「入れる」「更新する」「入れる場所を変える」をする。実行すると画面が出る。
 --   ・初めて：このファイルを REAPER で実行する（アクション → アクションリストを表示 → 新規アクション → ReaScript を読み込む）。
@@ -303,16 +303,19 @@ function M.register(root)
     return done, missing, ids
 end
 
--- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path, name = 小文字のファイル名, id = "RS…"}
+-- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path, name = 小文字のファイル名, id = "RS…", keys = ショートカットがあるか}
 function M.kb_scripts()
     local res = as_dir(r.GetResourcePath())
+    local text = M.read_file(res .. "reaper-kb.ini") or ""
+    local with_keys = {}
+    for id in ("\n" .. text):gmatch("\nKEY%s+%d+%s+%d+%s+_(%S+)") do with_keys[id] = true end
     local out = {}
-    for line in (M.read_file(res .. "reaper-kb.ini") or ""):gmatch("[^\r\n]+") do
+    for line in text:gmatch("[^\r\n]+") do
         local id, path = line:match('^SCR%s+%d+%s+%d+%s+(%S+)%s+".-"%s+(.+)$')
         if path then
             path = win(trim(path:gsub('^"(.*)"$', "%1")) or "")
             if not path:match("^%a:\\") and not path:match("^\\\\") then path = res .. "Scripts\\" .. path end  -- Scripts からの相対
-            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower(), id = id}
+            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower(), id = id, keys = with_keys[id] or false}
         end
     end
     return out
@@ -330,21 +333,26 @@ function M.in_git(path)
     return false
 end
 
--- 置き換える前のマクロ：入れる場所の外に登録してある、同じ名前（か、前の名前）のスクリプト。
--- {path, id, action, new_path, dev}（dev：開発中のフォルダなので触らない）
+-- アクションごとの登録（reaper-kb.ini）。1 つのアクションに、登録が 1 つだけになるようにまとめるため。
+-- {path, id, keys, action, new_path, kind, dev}。kind = "current"（新しいファイルの登録）/ "old"（前の名前・別の場所・名前の変わったもの）。
+-- dev：開発中のフォルダ（git の中）なので触らない
 function M.old_macros(root)
-    local by_name = {}
+    local by_name, by_path = {}, {}
     for _, a in ipairs(M.actions(root)) do
         for n in pairs(a.names) do by_name[n] = by_name[n] or a end
+        by_path[(root .. win(a.path)):lower()] = a
     end
     local out, seen = {}, {}
     local base = root:lower()
-    for _, s in ipairs(M.kb_scripts()) do
-        local a = by_name[s.name]
-        local low = s.path:lower()
-        if a and low:sub(1, #base) ~= base and not seen[s.id] then
-            seen[s.id] = true
-            out[#out + 1] = {path = s.path, id = s.id, action = a, new_path = root .. win(a.path), dev = M.in_git(s.path)}
+    for _, s_ in ipairs(M.kb_scripts()) do
+        local low = s_.path:lower()
+        local a = by_path[low] or by_name[s_.name]
+        if a and not seen[s_.id] then
+            seen[s_.id] = true
+            local new_path = root .. win(a.path)
+            local kind = low == new_path:lower() and "current" or "old"
+            local dev = kind == "old" and low:sub(1, #base) ~= base and M.in_git(s_.path) or false
+            out[#out + 1] = {path = s_.path, id = s_.id, keys = s_.keys, action = a, new_path = new_path, kind = kind, dev = dev}
         end
     end
     return out
@@ -358,7 +366,7 @@ function M.take_over(root, olds)
     local copied = {}
     for _, o in ipairs(olds) do
         local from_dir, to_dir = parent_dir(o.path), parent_dir(o.new_path)
-        for _, name in ipairs(o.action.takeover) do
+        for _, name in ipairs(from_dir:lower() == to_dir:lower() and {} or o.action.takeover) do
             local src = from_dir .. win(name)
             local data = not done[src:lower()] and M.read_file(src)
             if data and #data > 0 and M.write_file(to_dir .. win(name), data) then
@@ -373,28 +381,80 @@ function M.take_over(root, olds)
     return copied
 end
 
--- REAPER を閉じたときにすること（PowerShell に渡す表）：前の登録を新しいファイルに向け直す（ショートカット・ツールバーはそのまま）、
--- 新しく登録したほうの番号を前の番号に寄せる、前のファイルを old_macros へ動かす
-function M.replace_plan(root, olds, new_ids, stamp)
-    local lines, remapped, moved = {}, {}, {}
+-- 配っているファイル（MANIFEST.txt）の集合（小文字の、入れた場所からのパス）
+local function shipped_set(root)
+    local set = {}
+    local list = M.parse_manifest(M.read_file(root .. "MANIFEST.txt") or "")
+    for _, e in ipairs(list or {}) do set[win(e.path):lower()] = true end
+    return set
+end
+
+-- REAPER を閉じたときにすること（PowerShell に渡す表）。アクションごとに：
+--   ・登録が 2 つ以上あれば 1 つにする。残すのはショートカットのある前の登録 → ショートカットのある新しい登録 → 前の登録 → 新しい登録の順。
+--     残すのが前の登録なら、新しいファイルに向け直す（repoint）。ほかの登録は消して、ショートカット・ツールバーを残すほうへ寄せる（remap）
+--   ・前のマクロ（入れた場所の外）と、そのとなりの「一緒に動かすファイル」を old_macros へ
+--   ・入れた場所の中の、配らなくなったファイル（名前の変わった前のマクロ、そのとなりのファイル）も old_macros へ
+function M.replace_plan(root, entries, new_ids, stamp)
+    local lines, moved = {}, {}
     local backup = root .. "old_macros\\" .. stamp .. "\\"
-    for _, o in ipairs(olds) do
-        lines[#lines + 1] = "repoint\t" .. o.id .. "\t" .. o.new_path
-        local new_id = new_ids[o.new_path]
-        if new_id and new_id ~= o.id and not remapped[new_id] then
-            remapped[new_id] = true
-            lines[#lines + 1] = "remap\t" .. new_id .. "\t" .. o.id
+    local shipped = shipped_set(root)
+    local base = root:lower()
+    local function move(src, folder, name)
+        local low = src:lower()
+        if moved[low] then return end
+        if low:sub(1, #base) == base and shipped[low:sub(#base + 1)] then return end   -- 配っているファイルは動かさない
+        if not r.file_exists(src) then return end
+        moved[low] = true
+        lines[#lines + 1] = "move\t" .. src .. "\t" .. backup .. folder .. "\\" .. name
+    end
+    local groups, order_ = {}, {}
+    for _, e in ipairs(entries) do
+        if not e.dev then
+            local g = groups[e.new_path]
+            if not g then g = {action = e.action, list = {}} groups[e.new_path] = g order_[#order_ + 1] = e.new_path end
+            g.list[#g.list + 1] = e
         end
-        local dir = parent_dir(o.path)
-        local folder = dir:match("([^\\]+)\\$") or "old"
-        local files = {o.path:match("[^\\]+$")}
-        for _, c in ipairs(o.action.companions) do files[#files + 1] = win(c) end
-        for _, f in ipairs(files) do
-            local src = dir .. f
-            if not moved[src:lower()] and src:lower():sub(1, #root) ~= root:lower() and (r.file_exists(src) or o.path == src) then
-                moved[src:lower()] = true
-                lines[#lines + 1] = "move\t" .. src .. "\t" .. backup .. folder .. "\\" .. f
+    end
+    for _, new_path in ipairs(order_) do
+        local g = groups[new_path]
+        local list = g.list
+        local nid = new_ids[new_path]
+        if nid then
+            local have = false
+            for _, e in ipairs(list) do if e.id == nid then have = true end end
+            if not have then list[#list + 1] = {id = nid, kind = "current", keys = false, new_path = new_path, action = g.action} end
+        end
+        local olds = 0
+        for _, e in ipairs(list) do if e.kind == "old" then olds = olds + 1 end end
+        if olds > 0 or #list > 1 then
+            local keeper
+            for _, rule in ipairs({{"old", true}, {"current", true}, {"old", false}, {"current", false}}) do
+                for _, e in ipairs(list) do
+                    if not keeper and e.kind == rule[1] and (not rule[2] or e.keys) then keeper = e end
+                end
             end
+            if keeper.kind == "old" then lines[#lines + 1] = "repoint\t" .. keeper.id .. "\t" .. new_path end
+            for _, e in ipairs(list) do
+                if e.id ~= keeper.id then lines[#lines + 1] = "remap\t" .. e.id .. "\t" .. keeper.id end
+            end
+        end
+        -- 前のマクロと、そのとなりのファイル
+        for _, e in ipairs(list) do
+            if e.kind == "old" then
+                local dir = parent_dir(e.path)
+                local folder = dir:match("([^\\]+)\\$") or "old"
+                move(e.path, folder, e.path:match("[^\\]+$"))
+                for _, c in ipairs(g.action.companions) do move(dir .. win(c), folder, win(c)) end
+            end
+        end
+    end
+    -- 入れた場所の中の、配らなくなった「一緒に動かすファイル」（前の版で配っていたプリセットなど）
+    for _, a in ipairs(M.actions(root)) do
+        local dir = parent_dir(root .. win(a.path))
+        local folder = dir:match("([^\\]+)\\$") or "old"
+        for _, c in ipairs(a.companions) do move(dir .. win(c), folder, win(c)) end
+        for n in pairs(a.names) do
+            if n ~= a.path:match("[^/]+$"):lower() then move(dir .. n, folder, n) end   -- 名前の変わった前のマクロ
         end
     end
     return lines, backup
@@ -474,20 +534,24 @@ function M.schedule(root, lines, backup)
     return true
 end
 
--- 前のマクロを置き換える準備をする。{replaced = 置き換えるもの, dev = 触らないもの, copied = 引き継いだファイル}
+-- 前のマクロを置き換え、登録を 1 つにまとめる準備をする。
+-- {replaced = 置き換える前の登録, merged = まとめて消す新しい登録の数, moves = 動かすファイルの数, dev = 触らないもの, copied = 引き継いだファイル}
 function M.replace_old(root, new_ids)
     local all = M.old_macros(root)
     local olds, dev = {}, {}
     for _, o in ipairs(all) do
-        if o.dev then dev[#dev + 1] = o else olds[#olds + 1] = o end
+        if o.dev then dev[#dev + 1] = o elseif o.kind == "old" then olds[#olds + 1] = o end
     end
-    local out = {replaced = olds, dev = dev, copied = {}}
-    if #olds > 0 then
-        out.copied = M.take_over(root, olds)
-        local lines, backup = M.replace_plan(root, olds, new_ids or {}, os.date("%Y%m%d"))
-        out.backup = backup
-        out.scheduled = M.schedule(root, lines, backup)
+    local out = {replaced = olds, dev = dev, copied = {}, merged = 0, moves = 0}
+    out.copied = M.take_over(root, olds)
+    local lines, backup = M.replace_plan(root, all, new_ids or {}, os.date("%Y%m%d"))
+    for _, l in ipairs(lines) do
+        local k = l:match("^(%a+)")
+        if k == "move" then out.moves = out.moves + 1 elseif k == "remap" then out.merged = out.merged + 1 end
     end
+    out.backup = backup
+    if #lines > 0 then out.scheduled = M.schedule(root, lines, backup) end
+    out.pending = #lines > 0
     return out
 end
 
@@ -633,13 +697,16 @@ local FIRST_TIME = "■ 初めての人がやること\n" ..
 
 -- 置き換えの知らせ
 function M.replace_text(rep)
-    if #rep.replaced == 0 then return nil end
-    local lines = {"■ 前のマクロを置き換えます", "次のマクロは、REAPER を閉じたときに新しいものに置き換わります。" ..
-        "ショートカットとツールバーのボタンは、そのまま新しいほうで動きます。"}
-    for _, o in ipairs(rep.replaced) do lines[#lines + 1] = "・" .. o.path .. " → " .. o.action.label end
-    lines[#lines + 1] = "前のファイルは " .. (rep.backup or "") .. " に移します（消しません）。"
+    if not rep.pending then return nil end
+    local lines = {"■ 前のマクロの片付け（REAPER を閉じたときに行う）"}
+    if #rep.replaced > 0 then
+        lines[#lines + 1] = "次の前のマクロを、新しいものに置き換えます。ショートカットとツールバーのボタンは、そのまま新しいほうで動きます："
+        for _, o in ipairs(rep.replaced) do lines[#lines + 1] = "・" .. o.path .. " → " .. o.action.label end
+    end
+    if rep.merged > 0 then lines[#lines + 1] = string.format("同じマクロの登録が重なっていたので、1 つにまとめます（%d 個を消す。ショートカットは残すほうへ）。", rep.merged) end
+    if rep.moves > 0 then lines[#lines + 1] = string.format("要らなくなったファイル %d 個を %s に移します（消しません）。", rep.moves, rep.backup or "") end
     for _, c in ipairs(rep.copied) do lines[#lines + 1] = "引き継いだ設定・プリセット：" .. c end
-    if not rep.scheduled then lines[#lines + 1] = "（置き換えの準備ができませんでした。user フォルダに書けるかを確かめてください）" end
+    if not rep.scheduled then lines[#lines + 1] = "（片付けの準備ができませんでした。user フォルダに書けるかを確かめてください）" end
     lines[#lines + 1] = "→ REAPER を閉じて、開き直してください。"
     return table.concat(lines, "\n")
 end
@@ -870,7 +937,7 @@ local function refresh()
     ui.zip = M.find_zip({ui.root, M.HERE ~= ui.root and M.HERE or ""})
     ui.olds = 0
     if M.is_install(ui.root) then
-        for _, o in ipairs(M.old_macros(ui.root)) do if not o.dev then ui.olds = ui.olds + 1 end end
+        for _, o in ipairs(M.old_macros(ui.root)) do if not o.dev and o.kind == "old" then ui.olds = ui.olds + 1 end end
     end
 end
 
@@ -879,6 +946,13 @@ local function do_pending()
     ui.pending = nil
     if what == "check" then
         refresh()
+        -- 入れてあれば、登録・前のマクロ・要らないファイルの片付けを、ここでも準備する（REAPER を閉じたときに行う）
+        if M.is_install(ui.root) then
+            local _, _, ids = M.register(ui.root)
+            local rep = M.replace_old(ui.root, ids)
+            local t = M.replace_text(rep)
+            if t then ui.message = t end
+        end
         ui.latest, ui.latest_err = M.latest_version(ui.root)
         -- 入れた場所にデータの ZIP が置いてあれば、そのまま入れる
         if ui.zip and M.is_install(ui.root) then ui.pending = "zip" end
@@ -965,7 +1039,7 @@ local function frame()
     if button("フォルダを開く", x + 404, y, 130, 36, not busy) then ui.pending = "open" end
     y = y + 46
     if (ui.olds or 0) > 0 then
-        text_at(string.format("前のマクロが %d 個あります。REAPER を閉じると新しいものに置き換わります（ショートカットはそのまま）", ui.olds), x, y, C.warn)
+        text_at(string.format("前のマクロが %d 個あります。REAPER を閉じると片付けます（ショートカットはそのまま）", ui.olds), x, y, C.warn)
         y = y + ROW
     end
     color(C.line)

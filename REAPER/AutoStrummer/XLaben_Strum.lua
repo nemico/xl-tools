@@ -10,6 +10,7 @@
 -- キー：Z/X Offset、D/F Min、C/V Max、B/N Global、G/H Note Off（Brushing のときは長さ）、E Up/Down、Q Move Note Off、
 --   W Brushing、T Ruler Select、A Apply、Enter Apply して閉じる、Esc 閉じる、Space 再生・停止、
 --   1〜9・0 プリセットを読み込んで Apply（S を押してから数字で保存）。プリセットのボタン：押すと Apply、空なら保存、Shift+クリックで消す。
+--   数字キーと S は、MIDI エディターで作業しているときも効く（この窓が開いている間。js_ReaScriptAPI が要る）。
 -- Ruler Select：編集カーソルを動かすと、そこで鳴っているノートだけを選ぶ（和音を 1 つずつ選んでいける）。
 -- ドッキング：右クリック。もう一度実行すると、見えていれば閉じる（ほかのツールと同じ）。ほかのツールのショートカットもこの画面で効く。
 -- プリセットは XLabenTools\user\strum_presets.json（更新で消えない）。前の AutoStrummer_presets.lua は最初に開いたときに移す。
@@ -101,11 +102,26 @@ local function user_dir()
 end
 local PRESETS = XLABEN_STRUM_PRESETS or (user_dir() .. "strum_presets.json")   -- テストでは別の場所
 local OLD_DIR = XLABEN_STRUM_OLD_DIR or DIR                                  -- 前の形のファイルがある所
+-- 前の形のファイル：このフォルダに無ければ、更新が片付けた先（XLabenTools\old_macros\<日付>\AutoStrummer）の新しいほうから
+local function old_text(name)
+    local s = read_file(OLD_DIR .. name)
+    if s then return s end
+    local om = (XLABEN_STRUM_OLD_MACROS or user_dir():gsub("user[\\/]$", "") .. "old_macros" .. SEP)
+    local best
+    local i = 0
+    while r.EnumerateSubdirectories do
+        local d = r.EnumerateSubdirectories(om, i)
+        if not d then break end
+        if (not best or d > best) and r.file_exists(om .. d .. SEP .. "AutoStrummer" .. SEP .. name) then best = d end
+        i = i + 1
+    end
+    return best and read_file(om .. best .. SEP .. "AutoStrummer" .. SEP .. name)
+end
 local presets = {}
 local function load_presets()
     local s = read_file(PRESETS)
     if s then presets = store.from_json(s) return end
-    local old = store.read_old(read_file(OLD_DIR .. "AutoStrummer_presets.lua"))   -- 前の形から移す
+    local old = store.read_old(old_text("AutoStrummer_presets.lua"))   -- 前の形から移す
     presets = old or {}
     if old then write_file(PRESETS, store.to_json(presets)) end
 end
@@ -133,7 +149,7 @@ local function say(s, secs) status, status_until = s, r.time_precise() + (secs o
 do  -- Ruler Select は ExtState に（前の AutoStrummer_settings.lua に On があれば、それを引き継ぐ）
     local v = r.GetExtState(EXT, "ruler")
     if v == "" then
-        local old = read_file(OLD_DIR .. "AutoStrummer_settings.lua") or ""
+        local old = old_text("AutoStrummer_settings.lua") or ""
         v = old:match("rulerSelectMode%s*=%s*true") and "1" or "0"
         r.SetExtState(EXT, "ruler", v, true)
     end
@@ -407,6 +423,40 @@ local function on_key(c, cap)
     end
 end
 
+-- プリセットのキーは、MIDI エディターで作業しているとき（この窓がアクティブでないとき）も効かせる（js_ReaScriptAPI が要る）。
+--   この窓が開いていて、フォーカスが MIDI エディターにある間だけ、数字キー（上の段とテンキー）と S を REAPER より先に受け取る。
+--   Ctrl・Shift・Alt を押している間は受け取らない（MIDI エディターのショートカットのまま）。
+local HOT = {{0x53, 115}}   -- {仮想キー, 文字}。S を先に（S → 数字を同じフレームで押しても、保存になる）
+for i = 0, 9 do HOT[#HOT + 1] = {0x30 + i, 48 + i} HOT[#HOT + 1] = {0x60 + i, 48 + i} end
+local hot_on, hot_t = false, 0
+local function hot_wanted()
+    if closing or not (r.JS_VKeys_Intercept and r.JS_VKeys_GetDown and r.JS_Window_GetFocus) then return false end
+    local me = r.MIDIEditor_GetActive()
+    local focus = r.JS_Window_GetFocus()
+    if not me or not focus then return false end
+    if focus ~= me and not (r.JS_Window_IsChild and r.JS_Window_IsChild(me, focus)) then return false end
+    if r.JS_Mouse_GetState and r.JS_Mouse_GetState(4 | 8 | 16) ~= 0 then return false end
+    return true
+end
+local function hot_set(on)
+    if on == hot_on then return end
+    hot_on = on
+    for _, k in ipairs(HOT) do r.JS_VKeys_Intercept(k[1], on and 1 or -1) end
+end
+local function hot_keys()
+    local want = hot_wanted()
+    if want and not hot_on then hot_t = r.time_precise() end   -- 受け取り始める前に押したキーは数えない
+    hot_set(want)
+    if not hot_on then return end
+    local t = r.time_precise()
+    local down = r.JS_VKeys_GetDown(hot_t) or ""
+    hot_t = t
+    for _, k in ipairs(HOT) do
+        local b = down:byte(k[1])
+        if b and b ~= 0 then on_key(k[2], 0) end
+    end
+end
+
 -- Ruler Select：編集カーソルが動いて 20 ms 止まったら、そこで鳴っているノートを選ぶ
 local function update_ruler()
     if not ruler or not take then return end
@@ -432,6 +482,7 @@ local finished = false
 local function finish()
     if finished then return end
     finished = true
+    hot_set(false)   -- 受け取っていたキーを REAPER に戻す
     win.finish(EXT)
     local dock, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
     r.SetExtState(EXT, "window", string.format("%d,%d,%d,%d,%d", w, h, dock, x, y), true)
@@ -447,6 +498,7 @@ local function loop()
     if now - bindings_read > 3 then read_bindings() end
     refresh()
     update_ruler()
+    hot_keys()
     while c > 0 do
         if keys.matches(bindings, c, gfx.mouse_cap) then closing = true break end   -- 自分のショートカット：閉じる
         if not keys.run_other(r, other_bindings, c, gfx.mouse_cap) then on_key(c, gfx.mouse_cap) end
