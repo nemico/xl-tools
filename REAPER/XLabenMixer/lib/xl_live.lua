@@ -3,7 +3,7 @@ local r = reaper
 local M = {}
 
 M.NS = "A2M_LIVE"
-M.VERSION = 12
+M.VERSION = 13
 M.CCB = 300000      -- CC の表（チャンネル 0〜15 × 128。-1 = リセットのあとの既定のまま）
 M.NRB, M.RPB, M.SELB = 500000, 520000, 521000   -- NRPN の値、RPN の値、選んでいるもの（JSFX の説明と同じ）
 M.BASE, M.SLOTS, M.SLOT = 128, 4096, 72

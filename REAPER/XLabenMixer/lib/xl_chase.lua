@@ -68,6 +68,8 @@ function M.chase_channel(msgs, ch)
             elseif DATA_CC[d1] and sel.mode then
                 local s = sel[sel.mode]
                 local key = string.format("de:%s:%s:%s:%d", sel.mode, tostring(s[1]), tostring(s[2]), d1)
+                -- データの増減（96 / 97）は1回ごとに効くので、最後の1回ではなく全部を元の順番で送る
+                if d1 == 96 or d1 == 97 then key = key .. ":" .. seq end
                 keep(key, seq, "data", {d1, d2}, {mode = sel.mode, msb = s[1], lsb = s[2]})
             else
                 if d1 == 0 then bank.msb = d2 elseif d1 == 32 then bank.lsb = d2 end
