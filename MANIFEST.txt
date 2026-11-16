@@ -100,8 +100,8 @@
 28583	-	A2M/scripts/ai_build_project.lua
 21243	-	A2M/scripts/delivery_check.lua
 6056	-	A2M/scripts/reaper_backend.py
-1068	-	actions.txt
-5583	-	CHANGES.txt
+1131	-	actions.txt
+6261	-	CHANGES.txt
 5737	-	README.txt
 6302	-	REAPER/AutoStrummer/lib/strum_core.lua
 6390	-	REAPER/AutoStrummer/lib/strum_store.lua
@@ -142,4 +142,4 @@
 3694	-	REAPER/XLabenUI/lib/pf_db.lua
 4555	-	REAPER/XLabenUI/lib/pf_setup.lua
 33859	-	REAPER/XLabenUI/XLaben_PatchFinder.lua
-57605	-	XLaben_Update.lua
+58631	-	XLaben_Update.lua

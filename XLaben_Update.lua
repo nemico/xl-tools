@@ -303,7 +303,8 @@ function M.register(root)
     return done, missing, ids
 end
 
--- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path, name = 小文字のファイル名, id = "RS…", keys = ショートカットがあるか}
+-- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path, name = 小文字のファイル名, id = "RS…", keys = ショートカットがあるか,
+-- section = "0"（メイン）・"32060"（MIDI エディター）…}。番号はセクションごとに別（MIDI エディターは RS7d3c_…）
 function M.kb_scripts()
     local res = as_dir(r.GetResourcePath())
     local text = M.read_file(res .. "reaper-kb.ini") or ""
@@ -311,11 +312,12 @@ function M.kb_scripts()
     for id in ("\n" .. text):gmatch("\nKEY%s+%d+%s+%d+%s+_(%S+)") do with_keys[id] = true end
     local out = {}
     for line in text:gmatch("[^\r\n]+") do
-        local id, path = line:match('^SCR%s+%d+%s+%d+%s+(%S+)%s+".-"%s+(.+)$')
+        local section, id, path = line:match('^SCR%s+%d+%s+(%d+)%s+(%S+)%s+".-"%s+(.+)$')
         if path then
             path = win(trim(path:gsub('^"(.*)"$', "%1")) or "")
             if not path:match("^%a:\\") and not path:match("^\\\\") then path = res .. "Scripts\\" .. path end  -- Scripts からの相対
-            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower(), id = id, keys = with_keys[id] or false}
+            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower(), id = id, keys = with_keys[id] or false,
+                             section = section}
         end
     end
     return out
@@ -334,13 +336,19 @@ function M.in_git(path)
 end
 
 -- アクションごとの登録（reaper-kb.ini）。1 つのアクションに、登録が 1 つだけになるようにまとめるため。
--- {path, id, keys, action, new_path, kind, dev}。kind = "current"（新しいファイルの登録）/ "old"（前の名前・別の場所・名前の変わったもの）。
--- dev：開発中のフォルダ（git の中）なので触らない
+-- {path, id, keys, section, action, new_path, kind, dev}。kind = "current"（新しいファイルの登録）/ "old"（前の名前・別の場所・名前の変わったもの、
+-- まちがえてアクションに登録した「一緒に動かすファイル」＝前のプリセットなど）。dev：開発中のフォルダ（git の中）なので触らない
 function M.old_macros(root)
     local by_name, by_path = {}, {}
     for _, a in ipairs(M.actions(root)) do
         for n in pairs(a.names) do by_name[n] = by_name[n] or a end
         by_path[(root .. win(a.path)):lower()] = a
+    end
+    for _, a in ipairs(M.actions(root)) do
+        for _, c in ipairs(a.companions) do
+            local n = (win(c):match("[^\\]+$") or ""):lower()
+            if n:match("%.lua$") or n:match("%.eel$") or n:match("%.py$") then by_name[n] = by_name[n] or a end
+        end
     end
     local out, seen = {}, {}
     local base = root:lower()
@@ -352,7 +360,8 @@ function M.old_macros(root)
             local new_path = root .. win(a.path)
             local kind = low == new_path:lower() and "current" or "old"
             local dev = kind == "old" and low:sub(1, #base) ~= base and M.in_git(s_.path) or false
-            out[#out + 1] = {path = s_.path, id = s_.id, keys = s_.keys, action = a, new_path = new_path, kind = kind, dev = dev}
+            out[#out + 1] = {path = s_.path, id = s_.id, keys = s_.keys, section = s_.section or "0", action = a, new_path = new_path,
+                             kind = kind, dev = dev}
         end
     end
     return out
@@ -407,18 +416,25 @@ function M.replace_plan(root, entries, new_ids, stamp)
         moved[low] = true
         lines[#lines + 1] = "move\t" .. src .. "\t" .. backup .. folder .. "\\" .. name
     end
+    -- まとめるのはセクションごと（メインと MIDI エディターの登録は番号が別。新しく登録した番号はメイン）
     local groups, order_ = {}, {}
     for _, e in ipairs(entries) do
         if not e.dev then
-            local g = groups[e.new_path]
-            if not g then g = {action = e.action, list = {}} groups[e.new_path] = g order_[#order_ + 1] = e.new_path end
+            local key = e.new_path .. "\t" .. (e.section or "0")
+            local g = groups[key]
+            if not g then
+                g = {action = e.action, list = {}, new_path = e.new_path, section = e.section or "0"}
+                groups[key] = g
+                order_[#order_ + 1] = key
+            end
             g.list[#g.list + 1] = e
         end
     end
-    for _, new_path in ipairs(order_) do
-        local g = groups[new_path]
+    for _, key in ipairs(order_) do
+        local g = groups[key]
         local list = g.list
-        local nid = new_ids[new_path]
+        local new_path = g.new_path
+        local nid = g.section == "0" and new_ids[new_path]
         if nid then
             local have = false
             for _, e in ipairs(list) do if e.id == nid then have = true end end
