@@ -3,7 +3,8 @@ local r = reaper
 local M = {}
 
 M.NS = "A2M_LIVE"
-M.VERSION = 13
+M.VERSION = 14
+M.QUIET = 1000000   -- 待つミリ秒に足す「試聴だけ」の印（JSFX は送るが、覚えない）
 M.CCB = 300000      -- CC の表（チャンネル 0〜15 × 128。-1 = リセットのあとの既定のまま）
 M.NRB, M.RPB, M.SELB = 500000, 520000, 521000   -- NRPN の値、RPN の値、選んでいるもの（JSFX の説明と同じ）
 M.BASE, M.SLOTS, M.SLOT = 128, 4096, 72
@@ -23,8 +24,9 @@ function M.pending()
     return r.gmem_read(0) - r.gmem_read(1)
 end
 
--- 1件送る（文字列）。delay_ms は、前のメッセージを送ってから、これを送るまで待つ時間。入る場所がなければ false
-function M.send(msg, delay_ms)
+-- 1件送る（文字列）。delay_ms は、前のメッセージを送ってから、これを送るまで待つ時間。入る場所がなければ false。
+-- quiet なら「試聴だけ」：音源へ送るが、JSFX は覚えない（音源に入ったものの表・数を変えない）
+function M.send(msg, delay_ms, quiet)
     attach()
     local n = #msg
     if n < 1 or n > M.SLOT - 2 then return false end
@@ -32,7 +34,7 @@ function M.send(msg, delay_ms)
     if w - r.gmem_read(1) >= M.SLOTS then return false end
     local s = M.BASE + (w % M.SLOTS) * M.SLOT
     r.gmem_write(s, n)
-    r.gmem_write(s + 1, delay_ms or 0)
+    r.gmem_write(s + 1, (delay_ms or 0) + (quiet and M.QUIET or 0))
     for i = 1, n do r.gmem_write(s + 1 + i, msg:byte(i)) end
     r.gmem_write(0, w + 1)
     return true

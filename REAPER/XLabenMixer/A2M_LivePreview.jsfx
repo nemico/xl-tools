@@ -35,12 +35,14 @@ desc:A2M Live MIDI preview (X-Laben)
 //   90 前から再生するときの開始位置（秒、0 = なし）：再生中、これより前のノートオンは通さない（前の音が鳴り残らないように）。
 //      マスタートラックの A2M Preroll gate が、開始位置まで音を出さず、過ぎたら 0 に戻す
 //   128 から：送るメッセージ。1件 72 個（長さ、送る前に待つミリ秒、続いてバイト）。4096 件で一回り
+//      待つミリ秒に 1000000 を足してあれば「試聴だけ」：音源へ送るが、覚えない（音源に入ったものの表・数を変えない。
+//      Patch Finder の試聴で、再生のスクリプトや Sync が「音源の中が変わった」と見て全部を送り直さないように）
 //   300000 から：CC の表（チャンネル 0〜15 × 128。値、-1 = リセットのあとの既定のまま）
 //   500000 から：NRPN の値（(チャンネル × 9 + 枠) × 128 + LSB。枠 0 = MSB 1、1〜8 = MSB 24〜31。-1 = 分からない）
 //   520000 から：RPN の値（チャンネル × 3 + LSB 0〜2）/ 521000 から：選んでいるもの（チャンネル × 3：種類 1 = RPN・2 = NRPN、MSB、LSB。
 //      リセットのあとは「なし」= RPN 127 / 127）
 //   400000 から：記録（調べる用）。400000 = 書いた数、そのあと 1件 8 個 × 4096 件で一回り：
-//     出どころ（1 = トラック、2 = スクリプト、3 = トラックから来たが止めた）、再生中か（play_state）、位置（秒）、長さ、バイト 4 つ
+//     出どころ（1 = トラック、2 = スクリプト、3 = トラックから来たが止めた、4 = スクリプトの試聴だけ）、再生中か（play_state）、位置（秒）、長さ、バイト 4 つ
 //     ノート（8x / 9x）は記録しない
 options:gmem=A2M_LIVE
 in_pin:left
@@ -51,7 +53,7 @@ out_pin:right
 @init
 // 再生を始めるたびに @init をやり直さない（やり直すと、音源に入ったものの記録が消え、毎回全部を送り直すことになる）
 ext_noinit = 1;
-VERSION = 13;
+VERSION = 14;
 was_playing = 0;
 first_block = 0;
 LOG = 400000;
@@ -196,7 +198,8 @@ pos = 0;
 while (r < w && pos < samplesblock) (
   s = BASE + (r % SLOTS) * SLOT;
   !armed ? (
-    waiting = floor(max(0, gmem[s + 1]) * srate / 1000);
+    quiet = gmem[s + 1] >= 1000000;
+    waiting = floor(max(0, gmem[s + 1] - (quiet ? 1000000 : 0)) * srate / 1000);
     armed = 1;
   );
   waiting > 0 ? (
@@ -210,8 +213,8 @@ while (r < w && pos < samplesblock) (
       i = 0;
       loop(len, buf[i] = gmem[s + 2 + i]; i += 1;);
       midisend_buf(pos, buf, len);
-      observe(buf, len);
-      log_msg(2, buf, len);
+      !quiet ? observe(buf, len);
+      log_msg(quiet ? 4 : 2, buf, len);
     );
     r += 1;
     armed = 0;

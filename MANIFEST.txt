@@ -100,8 +100,8 @@
 28583	-	A2M/scripts/ai_build_project.lua
 21243	-	A2M/scripts/delivery_check.lua
 6056	-	A2M/scripts/reaper_backend.py
-926	-	actions.txt
-3121	-	CHANGES.txt
+1052	-	actions.txt
+3635	-	CHANGES.txt
 5739	-	README.txt
 600	keep	REAPER/AutoStrummer/AutoStrummer_presets.lua
 38	keep	REAPER/AutoStrummer/AutoStrummer_settings.lua
@@ -117,12 +117,12 @@
 969789	-	REAPER/EFXUI/xlaben_efx_data.json
 262	keep	REAPER/EFXUI/xlaben_efx_presets.json
 56200	-	REAPER/EFXUI/xlaben_system_effects.json
-13027	-	REAPER/XLabenMixer/A2M_LivePreview.jsfx
+13470	-	REAPER/XLabenMixer/A2M_LivePreview.jsfx
 858	-	REAPER/XLabenMixer/A2M_PrerollGate.jsfx
 458562	-	REAPER/XLabenMixer/data/tones.lua
 16409	-	REAPER/XLabenMixer/lib/xl_chase.lua
 6828	-	REAPER/XLabenMixer/lib/xl_keys.lua
-4073	-	REAPER/XLabenMixer/lib/xl_live.lua
+4359	-	REAPER/XLabenMixer/lib/xl_live.lua
 1537	-	REAPER/XLabenMixer/lib/xl_log.lua
 16446	-	REAPER/XLabenMixer/lib/xl_play.lua
 12839	-	REAPER/XLabenMixer/lib/xl_project.lua
@@ -137,4 +137,8 @@
 39786	-	REAPER/XLabenMixer/XLaben_Mixer.lua
 2628	-	REAPER/XLabenMixer/XLaben_Play.lua
 1703	-	REAPER/XLabenMixer/XLaben_Sync.lua
+320962	-	REAPER/XLabenUI/data/tones_db.lua
+3694	-	REAPER/XLabenUI/lib/pf_db.lua
+4555	-	REAPER/XLabenUI/lib/pf_setup.lua
+33859	-	REAPER/XLabenUI/XLaben_PatchFinder.lua
 52931	-	XLaben_Update.lua
