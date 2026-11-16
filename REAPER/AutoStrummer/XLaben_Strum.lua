@@ -10,9 +10,10 @@
 -- キー：Z/X Offset、D/F Min、C/V Max、B/N Global、G/H Note Off（Brushing のときは長さ）、E Up/Down、Q Move Note Off、
 --   W Brushing、T Ruler Select、A Apply、Enter Apply して閉じる、Esc 閉じる、Space 再生・停止、
 --   1〜9・0 プリセットを読み込んで Apply（S を押してから数字で保存）。プリセットのボタン：押すと Apply、空なら保存、Shift+クリックで消す。
---   数字キーと S は、MIDI エディターで作業しているときも効く（この窓が開いている間。js_ReaScriptAPI が要る）。
+--   数字キーは、この窓がアクティブでなくても効く（MIDI エディター・アレンジなど。S は MIDI エディターのとき。js_ReaScriptAPI が要る）。
+-- 右クリック：ドッキング、常に手前に表示（初めは On）。
 -- Ruler Select：編集カーソルを動かすと、そこで鳴っているノートだけを選ぶ（和音を 1 つずつ選んでいける）。
--- ドッキング：右クリック。もう一度実行すると、見えていれば閉じる（ほかのツールと同じ）。ほかのツールのショートカットもこの画面で効く。
+-- もう一度実行すると、見えていれば閉じる（ほかのツールと同じ）。ほかのツールのショートカットもこの画面で効く。
 -- プリセットは XLabenTools\user\strum_presets.json（更新で消えない）。前の AutoStrummer_presets.lua は最初に開いたときに移す。
 
 local r = reaper
@@ -423,38 +424,60 @@ local function on_key(c, cap)
     end
 end
 
--- プリセットのキーは、MIDI エディターで作業しているとき（この窓がアクティブでないとき）も効かせる（js_ReaScriptAPI が要る）。
---   この窓が開いていて、フォーカスが MIDI エディターにある間だけ、数字キー（上の段とテンキー）と S を REAPER より先に受け取る。
---   Ctrl・Shift・Alt を押している間は受け取らない（MIDI エディターのショートカットのまま）。
-local HOT = {{0x53, 115}}   -- {仮想キー, 文字}。S を先に（S → 数字を同じフレームで押しても、保存になる）
+-- プリセットのキーは、この窓がアクティブでないとき（MIDI エディター・アレンジなどで作業しているとき）も効かせる（js_ReaScriptAPI が要る）。
+--   この窓が開いている間、数字キー（上の段とテンキー）を REAPER より先に受け取る。S（保存）は MIDI エディターにいるときだけ
+--   （アレンジの S は「アイテムを分割」のまま）。受け取らないとき：この窓がアクティブ（いつもの gfx のキーで受ける）、
+--   文字を入れているところ（名前の欄など）、Ctrl・Shift・Alt を押している（REAPER のショートカットのまま）、ほかのアプリ。
+local HOT = {{0x53, 115, true}}   -- {仮想キー, 文字, MIDI エディターだけ}。S を先に（S → 数字を同じフレームで押しても、保存になる）
 for i = 0, 9 do HOT[#HOT + 1] = {0x30 + i, 48 + i} HOT[#HOT + 1] = {0x60 + i, 48 + i} end
-local hot_on, hot_t = false, 0
-local function hot_wanted()
-    if closing or not (r.JS_VKeys_Intercept and r.JS_VKeys_GetDown and r.JS_Window_GetFocus) then return false end
-    local me = r.MIDIEditor_GetActive()
-    local focus = r.JS_Window_GetFocus()
-    if not me or not focus then return false end
-    if focus ~= me and not (r.JS_Window_IsChild and r.JS_Window_IsChild(me, focus)) then return false end
-    if r.JS_Mouse_GetState and r.JS_Mouse_GetState(4 | 8 | 16) ~= 0 then return false end
-    return true
+local hot_on, hot_where_was, hot_t = {}, nil, 0
+local function own_window(focus)
+    if gfx.getchar(65536) & 2 == 2 then return true end   -- この窓にフォーカス
+    local me = r.JS_Window_Find and r.JS_Window_Find(TITLE, true)
+    return me ~= nil and (focus == me or (r.JS_Window_IsChild and r.JS_Window_IsChild(me, focus)))
 end
-local function hot_set(on)
-    if on == hot_on then return end
-    hot_on = on
-    for _, k in ipairs(HOT) do r.JS_VKeys_Intercept(k[1], on and 1 or -1) end
+-- 受け取る場所：nil（受け取らない）・"midi"（数字と S）・"any"（数字だけ）
+local function hot_where()
+    if closing or not (r.JS_VKeys_Intercept and r.JS_VKeys_GetDown and r.JS_Window_GetFocus) then return nil end
+    local focus = r.JS_Window_GetFocus()
+    if not focus or own_window(focus) then return nil end
+    local cls = (r.JS_Window_GetClassName and r.JS_Window_GetClassName(focus) or ""):lower()
+    if cls:find("edit", 1, true) or cls:find("combo", 1, true) then return nil end
+    if r.JS_Mouse_GetState and r.JS_Mouse_GetState(4 | 8 | 16) ~= 0 then return nil end
+    local me = r.MIDIEditor_GetActive()
+    if me and (focus == me or (r.JS_Window_IsChild and r.JS_Window_IsChild(me, focus))) then return "midi" end
+    return "any"
+end
+local function hot_set(where)
+    for _, k in ipairs(HOT) do
+        local on = where ~= nil and (not k[3] or where == "midi")
+        if on ~= (hot_on[k[1]] or false) then
+            hot_on[k[1]] = on
+            r.JS_VKeys_Intercept(k[1], on and 1 or -1)
+        end
+    end
 end
 local function hot_keys()
-    local want = hot_wanted()
-    if want and not hot_on then hot_t = r.time_precise() end   -- 受け取り始める前に押したキーは数えない
-    hot_set(want)
-    if not hot_on then return end
+    local where = hot_where()
+    if where ~= hot_where_was then hot_t = r.time_precise() end   -- 受け取り始める前に押したキーは数えない
+    hot_where_was = where
+    hot_set(where)
+    if not where then return end
     local t = r.time_precise()
     local down = r.JS_VKeys_GetDown(hot_t) or ""
     hot_t = t
     for _, k in ipairs(HOT) do
         local b = down:byte(k[1])
-        if b and b ~= 0 then on_key(k[2], 0) end
+        if hot_on[k[1]] and b and b ~= 0 then on_key(k[2], 0) end
     end
+end
+
+-- 常に手前に表示（右クリックで切り替え。ドッキングしていないとき。js_ReaScriptAPI が要る）
+local topmost = r.GetExtState(EXT, "topmost") ~= "0"
+local function apply_topmost()
+    if not (r.JS_Window_Find and r.JS_Window_SetZOrder) or gfx.dock(-1) & 1 == 1 then return end
+    local hwnd = r.JS_Window_Find(TITLE, true)
+    if hwnd then r.JS_Window_SetZOrder(hwnd, topmost and "TOPMOST" or "NOTOPMOST") end
 end
 
 -- Ruler Select：編集カーソルが動いて 20 ms 止まったら、そこで鳴っているノートを選ぶ
@@ -482,7 +505,7 @@ local finished = false
 local function finish()
     if finished then return end
     finished = true
-    hot_set(false)   -- 受け取っていたキーを REAPER に戻す
+    hot_set(nil)   -- 受け取っていたキーを REAPER に戻す
     win.finish(EXT)
     local dock, x, y, w, h = gfx.dock(-1, 0, 0, 0, 0)
     r.SetExtState(EXT, "window", string.format("%d,%d,%d,%d,%d", w, h, dock, x, y), true)
@@ -507,10 +530,18 @@ local function loop()
     local cap = gfx.mouse_cap
     local press = cap & 1 == 1 and mouse_was & 1 == 0
     local click = cap & 1 == 0 and mouse_was & 1 == 1
-    if cap & 2 == 0 and mouse_was & 2 == 2 and inside(0, 0, gfx.w, gfx.h) then   -- 右クリック：ドッキング
+    if cap & 2 == 0 and mouse_was & 2 == 2 and inside(0, 0, gfx.w, gfx.h) then   -- 右クリック：ドッキング・常に手前
         local dock = gfx.dock(-1)
         gfx.x, gfx.y = gfx.mouse_x, gfx.mouse_y
-        if gfx.showmenu((dock & 1 == 1 and "!" or "") .. "ドッキング") == 1 then gfx.dock(dock & 1 == 1 and 0 or 1) end
+        local pick = gfx.showmenu((dock & 1 == 1 and "!" or "") .. "ドッキング|" .. (topmost and "!" or "") .. "常に手前に表示")
+        if pick == 1 then
+            gfx.dock(dock & 1 == 1 and 0 or 1)
+            apply_topmost()
+        elseif pick == 2 then
+            topmost = not topmost
+            r.SetExtState(EXT, "topmost", topmost and "1" or "0", true)
+            apply_topmost()
+        end
     end
     mouse_was = cap
     gfx.mouse_wheel = 0   -- ホイールでは値を変えない
@@ -525,5 +556,6 @@ load_presets()
 local w, h, dock, x, y = (r.GetExtState(EXT, "window")):match("(%-?%d+),(%-?%d+),(%-?%d+),(%-?%d+),(%-?%d+)")
 gfx.init(TITLE, tonumber(w) or 540, tonumber(h) or 500, tonumber(dock) or 0, tonumber(x) or 200, tonumber(y) or 200)
 fonts()
+apply_topmost()
 r.atexit(finish)
 loop()

@@ -196,7 +196,7 @@ end
 
 -- 何を写して何を消すか。old_set：今入っている版の一覧（無ければ nil）、new_list：新しい版の一覧、exists(path)：今あるか
 --   写す：新しい版の全部。ただし keep の印のファイルは、すでにあれば写さない
---   消す：前の版にあって新しい版に無いもの（keep の印だったものは残す）。一覧に無いファイルには触らない
+--   外す：前の版にあって新しい版に無いもの（keep の印だったものは残す）。消さずに old_macros\<日付> へ移す。一覧に無いファイルには触らない
 function M.plan(old_set, new_list, exists)
     local copy, remove, new_set = {}, {}, {}
     for _, e in ipairs(new_list) do
@@ -222,7 +222,17 @@ function M.load_release(src, copy)
     return data
 end
 
--- 写して、要らなくなったものを消す。書けなかったパスの一覧を返す（空なら成功）
+-- 要らなくなったファイルを、消さずに old_macros\<日付>\ へ移す（入れた場所の中と同じ並びで）。移せなければ、そのまま残す
+function M.retire(root, path, stamp)
+    local src = root .. win(path)
+    if not r.file_exists(src) then return true end
+    local dst = root .. "old_macros\\" .. stamp .. "\\" .. win(path)
+    r.RecursiveCreateDirectory((parent_dir(dst):gsub("\\$", "")), 0)
+    if r.file_exists(dst) then os.remove(dst) end   -- 同じ日に 2 回外したときは、あとのほう
+    return os.rename(src, dst) and true or false
+end
+
+-- 写して、要らなくなったものを old_macros へ。書けなかったパスの一覧を返す（空なら成功）
 function M.apply(root, copy, data, remove)
     local failed = {}
     for _, e in ipairs(copy) do
@@ -230,7 +240,8 @@ function M.apply(root, copy, data, remove)
         if not ok then failed[#failed + 1] = e.path end
     end
     if #failed == 0 then
-        for _, path in ipairs(remove) do os.remove(root .. win(path)) end
+        local stamp = os.date("%Y%m%d")
+        for _, path in ipairs(remove) do M.retire(root, path, stamp) end
     end
     return failed
 end
@@ -791,7 +802,7 @@ function M.run(root)
     res.copied, res.removed = applied.copied, applied.removed
     local parts = {}
     local head = res.from and string.format("更新しました：%s → %s", res.from, res.to) or ("入れました（版 " .. res.to .. "）")
-    parts[#parts + 1] = head .. string.format("\n場所：%s\n（%d ファイルを入れ替え、%d ファイルを消しました）", root, res.copied, res.removed)
+    parts[#parts + 1] = head .. string.format("\n場所：%s\n（%d ファイルを入れ替え、要らなくなった %d ファイルを old_macros へ移しました）", root, res.copied, res.removed)
     local changes, todo = M.news(root, res.from)
     -- 増えたアクション（更新のときだけ。初めてのときは、下の「初めての人がやること」に書いてある）
     res.new_actions = {}
