@@ -5,5 +5,5 @@ REAPER/EFXUI/xlaben_efx_controller.lua	EFX	efx_controller.lua	xlaben_efx_data.js
 REAPER/DrumReapermacro/XLaben_Drum.lua	ドラム	SC_Drum_Macro.lua	drum_mapping.json	
 REAPER/AutoStrummer/StrumEditor_V2.lua	オートストラマー		AutoStrummer_presets.lua,AutoStrummer_settings.lua,StrumEditor_log.txt	AutoStrummer_presets.lua,AutoStrummer_settings.lua
 A2M/scripts/ai_build_project.lua	AI でプロジェクトを作る（下書き）			
-A2M/scripts/delivery_check.lua	納品チェック（R02Checker。全部入りの ZIP が要る）			
+A2M/scripts/delivery_check.lua	納品チェック（R02Checker。データの ZIP が要る）			
 XLaben_Update.lua	インストール・更新			

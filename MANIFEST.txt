@@ -100,9 +100,9 @@
 28583	-	A2M/scripts/ai_build_project.lua
 21243	-	A2M/scripts/delivery_check.lua
 6056	-	A2M/scripts/reaper_backend.py
-929	-	actions.txt
-2207	-	CHANGES.txt
-5579	-	README.txt
+926	-	actions.txt
+2724	-	CHANGES.txt
+5739	-	README.txt
 600	keep	REAPER/AutoStrummer/AutoStrummer_presets.lua
 38	keep	REAPER/AutoStrummer/AutoStrummer_settings.lua
 58317	-	REAPER/AutoStrummer/StrumEditor_V2.lua
@@ -137,4 +137,4 @@
 39786	-	REAPER/XLabenMixer/XLaben_Mixer.lua
 2628	-	REAPER/XLabenMixer/XLaben_Play.lua
 1703	-	REAPER/XLabenMixer/XLaben_Sync.lua
-52455	-	XLaben_Update.lua
+52931	-	XLaben_Update.lua

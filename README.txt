@@ -9,7 +9,7 @@
   ・AI でプロジェクトを作る（A2M\scripts\ai_build_project.lua。テンポマップ・ステム・ドラム/ベース/歌の下書き・コード）
   ・納品チェック（A2M\scripts\delivery_check.lua。R02Checker で確かめて、引っかかった所にマーカーを置く）
   ・インストール・更新（XLaben_Update.lua）
-  AI の下書きと納品チェックは、全部入りの ZIP（Python・モデル・MIDIChecker 入り）が要る。
+  AI の下書きと納品チェックは、データの ZIP（Python・モデル・MIDIChecker。GitHub に置けない大きいもの）が要る。
 
 ■ 入れ方（最初に1回）
   1. REAPER で「アクション → アクションリストを表示 → 新規アクション → ReaScript を読み込む」で XLaben_Update.lua を選ぶ。画面が出る。
@@ -26,8 +26,8 @@
   ・前のファイルは XLabenTools\old_macros\<日付> に移る（消えない）。REAPER の登録の写し（reaper-kb.ini.bak）もそこに残る。
   ・前の EFXUI とオートストラマーで保存したプリセットは、新しいほうへ引き継がれる。
 
-■ AI の下書き・納品チェックも使う人（全部入りの ZIP）
-  ・全部入りの ZIP（XLabenTools_…_full.zip。約 6GB）を、展開せずにそのまま XLabenTools フォルダに置く（画面の「フォルダを開く」で開ける）。
+■ AI の下書き・納品チェックも使う人（データの ZIP）
+  ・データの ZIP（XLabenTools_data_….zip。約 6GB）を、展開せずにそのまま XLabenTools フォルダに置く（画面の「フォルダを開く」で開ける）。
   ・アクション「XLaben_Update.lua」を実行する。ZIP が自動で入って、ZIP は消える（数分。その間 REAPER は止まって見える）。
   ・まだ何も入れていない人は、渡された XLaben_Update.lua と同じフォルダに ZIP を置いて実行し、「ZIP からインストールする」を押してもよい。
   ・AI の下書きは、英数字だけのパスでないと動かない。画面に注意が出たら「場所を変える」で英数字だけの場所へ移す（例：D:\Tools）。
@@ -37,7 +37,8 @@
   ・更新したら、画面に出る「やること」（新しいアクションへのショートカット、設定など）をして、REAPER を一度閉じて開き直す。
   ・今の版は VERSION.txt、変わった点は CHANGES.txt。
   ・更新で変わらないもの：user フォルダ、ログ、自分で保存したプリセット、A2M の python・models・MIDIChecker。
-  ・「土台が古い」と出たら、新しい全部入りの ZIP をもらって、XLabenTools フォルダに置いて実行する。
+  ・「土台が古い」と出たら、新しいデータの ZIP をもらって、XLabenTools フォルダに置いて実行する。
+  ・データの ZIP はめったに変わらない。ふだんの更新は「更新する」だけでよい（ZIP は要らない）。
 
 ■ 場所を変える
   ・画面の「場所を変える」で、フォルダごと別の場所へ移せる。ショートカットは、REAPER を開き直すとそのまま使える。

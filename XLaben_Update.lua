@@ -1,18 +1,19 @@
 -- @description X-Laben ツール：インストール・更新
--- @version 3.0
+-- @version 4.0
 --
 -- これ 1 つで「入れる」「更新する」「入れる場所を変える」をする。実行すると画面が出る。
 --   ・初めて：このファイルを REAPER で実行する（アクション → アクションリストを表示 → 新規アクション → ReaScript を読み込む）。
 --     「インストールする」を押すと、REAPER の Scripts フォルダの中の XLabenTools フォルダに全部入り、アクションに登録される。
 --     入れる前に「場所を変える」で別の場所を選べる。
 --   ・更新：アクション「XLaben_Update.lua」を実行して「更新する」を押す。新しい版があれば入れ替える。
---   ・全部入りの ZIP（Python・モデル・MIDIChecker）：XLabenTools フォルダに ZIP を置いて、これを実行すると、自動で入って ZIP は消える。
+--   ・データの ZIP（GitHub に置けない大きいもの：Python・モデル・MIDIChecker）：XLabenTools フォルダに ZIP を置いて、これを実行すると、
+--     自動で入って ZIP は消える。データはめったに変わらないので、変わったときだけ配る。コードはいつも GitHub から。
 --   ・前に渡したマクロ（EFXUI・ドラム・ミキサー・オートストラマーなど）：新しいものに置き換える。ショートカットとツールバーはそのまま。
 --     前のファイルは XLabenTools\old_macros\<日付> へ移す。REAPER の登録（reaper-kb.ini）は REAPER が開いている間は書き換えられないので、
 --     REAPER を閉じたときに裏で書き換える（PowerShell）。開発中のフォルダ（git の中）のマクロには触らない。
 --   ・場所を変える：入れたあとでも、フォルダごと別の場所へ移せる（ショートカットは、REAPER を開き直すとそのまま使える）。
 -- 入れ替えるのは、配っているファイルだけ（MANIFEST.txt に書いてあるもの）。次のものには触らない：
---   user フォルダ、ログ、自分で保存したプリセット、A2M の python・models・MIDIChecker（全部入りの ZIP から入る）。
+--   user フォルダ、ログ、自分で保存したプリセット、A2M の python・models・MIDIChecker（データの ZIP から入る）。
 -- 使うもの：Windows に最初から入っている curl.exe・tar.exe・PowerShell。git は要らない。
 -- 配る元が非公開のときは、入れる場所の user\github_token.txt に読み取り専用のトークンを1行で置く（表示もログにも書かない）。
 
@@ -25,7 +26,7 @@ M.EXT = "XLabenTools"       -- REAPER に覚えておく名前（入れる場所
 M.FOLDER = "XLabenTools"    -- 専用のフォルダの名前
 M.HERE = (((debug.getinfo(1, "S").source:match("^@(.*[\\/])")) or ""):gsub("/", "\\"))  -- このファイルがあるフォルダ
 M.TIMEOUT_MS = 320000       -- ダウンロードを待つ上限
-M.BASE_DIRS = {"A2M\\python", "A2M\\models", "A2M\\MIDIChecker"}  -- 全部入りの ZIP から入るもの（更新では触らない）
+M.BASE_DIRS = {"A2M\\python", "A2M\\models", "A2M\\MIDIChecker"}  -- データの ZIP から入るもの（更新では触らない）
 
 local function sysexe(name)
     return (os.getenv("SystemRoot") or "C:\\Windows") .. "\\System32\\" .. name
@@ -142,7 +143,7 @@ function M.curl(url, out_path, accept, root)
     return true
 end
 
--- ZIP を dir に展開し、いちばん上のフォルダ（GitHub の ZIP は「owner-name-番号」、全部入りの ZIP は XLabenTools が1つ）を返す
+-- ZIP を dir に展開し、いちばん上のフォルダ（GitHub の ZIP は「owner-name-番号」、データの ZIP は XLabenTools が1つ）を返す
 function M.extract(zip, dir, timeout_ms)
     r.RecursiveCreateDirectory(dir, 0)
     local code, out = M.exec(string.format('"%s" -xf "%s" -C "%s"', sysexe("tar.exe"), zip, dir), timeout_ms or 120000)
@@ -402,7 +403,8 @@ end
 -- 閉じたときに動く PowerShell（ASCII だけで書く。Windows PowerShell 5.1 が BOM の無いファイルを ANSI で読むため）
 M.PS1 = [==[
 param([string]$Data, [string]$Exe)
-$mutex = New-Object System.Threading.Mutex($false, 'Local\XLabenToolsReplaceOnExit')
+$key = [BitConverter]::ToString((New-Object System.Security.Cryptography.SHA1Managed).ComputeHash([Text.Encoding]::UTF8.GetBytes($Data.ToLowerInvariant()))).Replace('-', '')
+$mutex = New-Object System.Threading.Mutex($false, 'Local\XLabenToolsReplaceOnExit_' + $key)
 if (-not $mutex.WaitOne(0)) { exit 0 }
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 while ($true) {
@@ -489,7 +491,7 @@ function M.replace_old(root, new_ids)
     return out
 end
 
------------------------------------------------------------------------------- 全部入りの ZIP
+------------------------------------------------------------------------------ データの ZIP
 -- XLabenTools…zip を探す（dirs の順に）。見つからなければ nil
 function M.find_zip(dirs)
     for _, dir in ipairs(dirs) do
@@ -508,7 +510,8 @@ function M.find_zip(dirs)
     return nil
 end
 
--- 全部入りの ZIP から入れる：Python・モデル・MIDIChecker を入れ替え、コードは ZIP のほうが新しいときだけ入れる。うまくいったら ZIP を消す。
+-- データの ZIP から入れる：Python・モデル・MIDIChecker を入れ替える。うまくいったら ZIP を消す。
+-- 前の全部入りの ZIP（コードも入っている）なら、コードは ZIP のほうが新しいときだけ入れる。
 -- 成功：{to, code = コードも入れたか, removed_zip}。だめ：nil, 理由（コードと Python などは前のまま）
 function M.install_zip(root, zip)
     r.RecursiveCreateDirectory(root, 0)
@@ -516,13 +519,13 @@ function M.install_zip(root, zip)
     M.rmdir(tmp)
     local src, err = M.extract(zip, tmp, 0)  -- 0：終わるまで待つ（数分）
     if not src then M.rmdir(tmp) return nil, "ZIP を展開できませんでした（空きが足りているかを確かめてください）。\n" .. tostring(err) end
-    if not r.file_exists(src .. "MANIFEST.txt") or not r.file_exists(src .. "A2M\\BASE.txt") then
+    if not r.file_exists(src .. "A2M\\BASE.txt") then
         M.rmdir(tmp)
-        return nil, "全部入りの ZIP ではありません：" .. zip
+        return nil, "X-Laben ツールのデータの ZIP ではありません：" .. zip
     end
     local have, zipver = trim(M.read_file(root .. "VERSION.txt")), trim(M.read_file(src .. "VERSION.txt"))
-    local out = {to = zipver, code = false}
-    if not M.is_install(root) or M.version_gt(zipver, have) then
+    local out = {to = zipver, code = false, base = trim(M.read_file(src .. "A2M\\BASE.txt"))}
+    if r.file_exists(src .. "MANIFEST.txt") and (not M.is_install(root) or M.version_gt(zipver, have)) then
         local res, why = M.apply_source(root, src)
         if not res then M.rmdir(tmp) return nil, why end
         out.code = true
@@ -556,19 +559,19 @@ function M.install_zip(root, zip)
 end
 
 ------------------------------------------------------------------------------ 知らせること
--- AI の下書きの土台（Python・モデル・MIDIChecker。全部入りの ZIP から入る）：("ok" / "none" / "old" / "unused", 知らせる文)
+-- AI の下書きの土台（Python・モデル・MIDIChecker。データの ZIP から入る）：("ok" / "none" / "old" / "unused", 知らせる文)
 function M.base_state(root)
     local need = trim(M.read_file(root .. "A2M\\BASE_REQUIRED.txt"))
     if not need then return "unused", nil end
     local have = trim(M.read_file(root .. "A2M\\BASE.txt"))
-    local how = "全部入りの ZIP（XLabenTools_…_full.zip）を、入れた場所の XLabenTools フォルダにそのまま置いて（「フォルダを開く」で開ける）、\n" ..
+    local how = "データの ZIP（XLabenTools_data_….zip）を、入れた場所の XLabenTools フォルダにそのまま置いて（「フォルダを開く」で開ける）、\n" ..
         "もう一度「XLaben_Update」を実行してください。自動で入って、ZIP は消えます。"
     if not have then
         return "none", "AI の下書きと納品チェックを使うには、Python・モデル・MIDIChecker が要ります。\n" .. how ..
             "\nミキサー・EFX・ドラム・再生・オートストラマーは、このままで使えます。"
     end
     if have ~= need then
-        return "old", "AI の下書きの土台（Python・モデル・MIDIChecker）が古いです。新しい全部入りの ZIP が要ります。\n" .. how
+        return "old", "AI の下書きの土台（Python・モデル・MIDIChecker）が古いです。新しいデータの ZIP が要ります。\n" .. how
     end
     return "ok", nil
 end
@@ -729,16 +732,16 @@ function M.run(root)
     return finish(res.from and "updated" or "installed", parts)
 end
 
--- 全部入りの ZIP から入れてから、GitHub の新しい版を確かめる
+-- データの ZIP から入れてから、GitHub の新しい版を確かめる（まだ入れていなければ、コードは GitHub から入る）
 function M.run_zip(root, zip)
     local z, err = M.install_zip(root, zip)
     if not z then
         log(root, "zip failed %s", tostring(err))
-        return {status = "failed", text = "全部入りの ZIP から入れられませんでした（ZIP は残してあります）。\n\n" .. tostring(err), root = root}
+        return {status = "failed", text = "データの ZIP から入れられませんでした（ZIP は残してあります）。\n\n" .. tostring(err), root = root}
     end
     log(root, "zip %s code=%s", tostring(z.to), tostring(z.code))
     local res = M.run(root)
-    local head = "全部入りの ZIP（版 " .. tostring(z.to) .. "）から、Python・モデル・MIDIChecker を入れました。" ..
+    local head = "データの ZIP から、Python・モデル・MIDIChecker を入れました。" ..
         (z.removed_zip and "ZIP は消しました。" or "ZIP を消せませんでした（手で消してください）。")
     res.zip = z
     res.text = head .. "\n\n" .. res.text
@@ -877,7 +880,7 @@ local function do_pending()
     if what == "check" then
         refresh()
         ui.latest, ui.latest_err = M.latest_version(ui.root)
-        -- 入れた場所に全部入りの ZIP が置いてあれば、そのまま入れる
+        -- 入れた場所にデータの ZIP が置いてあれば、そのまま入れる
         if ui.zip and M.is_install(ui.root) then ui.pending = "zip" end
     elseif what == "run" or what == "zip" then
         local res = (ui.zip and (what == "zip" or not M.is_install(ui.root))) and M.run_zip(ui.root, ui.zip) or M.run(ui.root)
@@ -906,7 +909,7 @@ local function do_pending()
 end
 
 local BUSY = {check = "新しい版があるかを確かめています…", run = "ダウンロードして入れ替えています…（少し待つ）",
-              zip = "全部入りの ZIP を展開して入れています…（数分。その間 REAPER は止まって見えます）",
+              zip = "データの ZIP を展開して入れています…（数分。その間 REAPER は止まって見えます）",
               move = "場所を変えています…（Python とモデルがあると数分かかる）"}
 
 local function frame()
@@ -949,10 +952,10 @@ local function frame()
     end
     text_at("AI の下書き", x, y, C.dim)
     local base = {ok = {"使えます（Python・モデル・MIDIChecker あり）", C.ok},
-                  none = {"Python・モデルがまだありません（全部入りの ZIP をこのフォルダに置く）", C.dim},
-                  old = {"Python・モデルが古い（新しい全部入りの ZIP をこのフォルダに置く）", C.warn}, unused = {"—", C.dim}}
+                  none = {"Python・モデルがまだありません（データの ZIP をこのフォルダに置く）", C.dim},
+                  old = {"Python・モデルが古い（新しいデータの ZIP をこのフォルダに置く）", C.warn}, unused = {"—", C.dim}}
     local b = base[installed and ui.base or "unused"] or base.unused
-    if ui.zip then b = {"全部入りの ZIP を見つけました：" .. (ui.zip:match("[^\\]+$") or ""), C.accent} end
+    if ui.zip then b = {"データの ZIP を見つけました：" .. (ui.zip:match("[^\\]+$") or ""), C.accent} end
     text_at(b[1], x + 110, y, b[2])
     y = y + ROW + 8
     -- ボタン
