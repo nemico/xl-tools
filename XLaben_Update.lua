@@ -1,15 +1,19 @@
 -- @description X-Laben ツール：インストール・更新
--- @version 2.0
+-- @version 3.0
 --
 -- これ 1 つで「入れる」「更新する」「入れる場所を変える」をする。実行すると画面が出る。
 --   ・初めて：このファイルを REAPER で実行する（アクション → アクションリストを表示 → 新規アクション → ReaScript を読み込む）。
 --     「インストールする」を押すと、REAPER の Scripts フォルダの中の XLabenTools フォルダに全部入り、アクションに登録される。
 --     入れる前に「場所を変える」で別の場所を選べる。
 --   ・更新：アクション「XLaben_Update.lua」を実行して「更新する」を押す。新しい版があれば入れ替える。
---   ・場所を変える：入れたあとでも、フォルダごと別の場所へ移せる（アクションは新しい場所で登録し直す。ショートカットは割り当て直し）。
+--   ・全部入りの ZIP（Python・モデル・MIDIChecker）：XLabenTools フォルダに ZIP を置いて、これを実行すると、自動で入って ZIP は消える。
+--   ・前に渡したマクロ（EFXUI・ドラム・ミキサー・オートストラマーなど）：新しいものに置き換える。ショートカットとツールバーはそのまま。
+--     前のファイルは XLabenTools\old_macros\<日付> へ移す。REAPER の登録（reaper-kb.ini）は REAPER が開いている間は書き換えられないので、
+--     REAPER を閉じたときに裏で書き換える（PowerShell）。開発中のフォルダ（git の中）のマクロには触らない。
+--   ・場所を変える：入れたあとでも、フォルダごと別の場所へ移せる（ショートカットは、REAPER を開き直すとそのまま使える）。
 -- 入れ替えるのは、配っているファイルだけ（MANIFEST.txt に書いてあるもの）。次のものには触らない：
---   user フォルダ、ログ、自分で保存した EFX のプリセット、A2M の python・models（全部入りの ZIP にだけ入っている）。
--- 使うもの：Windows に最初から入っている curl.exe と tar.exe（Windows 10 の 1803 以降）。git は要らない。
+--   user フォルダ、ログ、自分で保存したプリセット、A2M の python・models・MIDIChecker（全部入りの ZIP から入る）。
+-- 使うもの：Windows に最初から入っている curl.exe・tar.exe・PowerShell。git は要らない。
 -- 配る元が非公開のときは、入れる場所の user\github_token.txt に読み取り専用のトークンを1行で置く（表示もログにも書かない）。
 
 local r = reaper
@@ -21,8 +25,7 @@ M.EXT = "XLabenTools"       -- REAPER に覚えておく名前（入れる場所
 M.FOLDER = "XLabenTools"    -- 専用のフォルダの名前
 M.HERE = (((debug.getinfo(1, "S").source:match("^@(.*[\\/])")) or ""):gsub("/", "\\"))  -- このファイルがあるフォルダ
 M.TIMEOUT_MS = 320000       -- ダウンロードを待つ上限
--- 前に配っていたマクロ（今のものに置き換わった）。別の場所に登録が残っていたら知らせる（小文字で書く）
-M.OLD_NAMES = {"sc_drum_macro.lua", "x-labenmixer.lua"}
+M.BASE_DIRS = {"A2M\\python", "A2M\\models", "A2M\\MIDIChecker"}  -- 全部入りの ZIP から入るもの（更新では触らない）
 
 local function sysexe(name)
     return (os.getenv("SystemRoot") or "C:\\Windows") .. "\\System32\\" .. name
@@ -45,6 +48,8 @@ local function as_dir(path)
 end
 M.as_dir = as_dir
 
+local function parent_dir(path) return path:match("^(.*\\)[^\\]+\\?$") or "" end
+
 function M.read_file(path)
     local f = io.open(path, "rb")
     if not f then return nil end
@@ -63,12 +68,34 @@ function M.write_file(path, data)
     return true
 end
 
+-- フォルダがあって、中に何かあるか
+function M.dir_has_content(path)
+    path = path:gsub("\\$", "")
+    r.EnumerateFiles(path, -1)
+    r.EnumerateSubdirectories(path, -1)
+    return (r.EnumerateFiles(path, 0) or r.EnumerateSubdirectories(path, 0)) ~= nil
+end
+
 -- (終了コード, 出力)。REAPER の ExecProcess は「終了コード\n出力」を返す。失敗・時間切れは nil
 function M.exec(cmd, timeout_ms)
     local out = r.ExecProcess(cmd, timeout_ms or 120000)
     if not out then return -1, "" end
     local code, rest = out:match("^(%-?%d+)%s*\n?(.*)$")
     return tonumber(code) or -1, rest or ""
+end
+
+-- 版の番号（年.月.日[.n]）をくらべる：a が b より新しいか
+function M.version_gt(a, b)
+    if not a then return false end
+    if not b then return true end
+    local pa, pb = {}, {}
+    for n in a:gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
+    for n in b:gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
+    for i = 1, math.max(#pa, #pb) do
+        local x, y = pa[i] or 0, pb[i] or 0
+        if x ~= y then return x > y end
+    end
+    return false
 end
 
 ------------------------------------------------------------------------------ 入れる場所
@@ -115,10 +142,10 @@ function M.curl(url, out_path, accept, root)
     return true
 end
 
--- ZIP を dir に展開し、いちばん上のフォルダ（GitHub の ZIP は「owner-name-番号」が1つ）を返す
-function M.extract(zip, dir)
+-- ZIP を dir に展開し、いちばん上のフォルダ（GitHub の ZIP は「owner-name-番号」、全部入りの ZIP は XLabenTools が1つ）を返す
+function M.extract(zip, dir, timeout_ms)
     r.RecursiveCreateDirectory(dir, 0)
-    local code, out = M.exec(string.format('"%s" -xf "%s" -C "%s"', sysexe("tar.exe"), zip, dir), 120000)
+    local code, out = M.exec(string.format('"%s" -xf "%s" -C "%s"', sysexe("tar.exe"), zip, dir), timeout_ms or 120000)
     if code ~= 0 then return nil, string.format("tar %d %s", code, trim(out) or "") end
     r.EnumerateSubdirectories(dir, -1)  -- 前に見た結果を忘れさせる
     local top = r.EnumerateSubdirectories(dir, 0)
@@ -127,7 +154,7 @@ function M.extract(zip, dir)
 end
 
 function M.rmdir(dir)
-    M.exec(string.format('"%s" /C rmdir /S /Q "%s"', sysexe("cmd.exe"), dir), 600000)
+    M.exec(string.format('"%s" /C rmdir /S /Q "%s"', sysexe("cmd.exe"), (dir:gsub("\\$", ""))), 600000)
 end
 
 -- ダウンロードと展開に使う作業用のフォルダ（入れる場所の外。入れると決まるまで、入れる場所には何も作らない）
@@ -207,94 +234,341 @@ function M.apply(root, copy, data, remove)
     return failed
 end
 
+-- src（配る形のフォルダ）のコードを root に入れる。版の番号と一覧は最後に書く（途中で止まっても、もう一度でやり直せる）。
+-- 成功：{copied, removed, to}。だめ：nil, 理由, 何も書き換えていないか
+function M.apply_source(root, src)
+    local manifest = M.read_file(src .. "MANIFEST.txt")
+    if not manifest then return nil, "中に MANIFEST.txt がありません", true end
+    local new_list, err = M.parse_manifest(manifest)
+    if not new_list then return nil, err, true end
+    local old_list, old_set = M.parse_manifest(M.read_file(root .. "MANIFEST.txt") or "")
+    if not old_list then old_set = nil end  -- 今入っている版の一覧が無い・読めないときは、消すものは無し
+    local copy, remove = M.plan(old_set, new_list, function(path) return r.file_exists(root .. win(path)) end)
+    local data
+    data, err = M.load_release(src, copy)
+    if not data then return nil, err, true end
+    local failed = M.apply(root, copy, data, remove)
+    if #failed == 0 then
+        local a = M.write_file(root .. "MANIFEST.txt", manifest)
+        local b = M.write_file(root .. "VERSION.txt", M.read_file(src .. "VERSION.txt") or "")
+        if not (a and b) then failed[#failed + 1] = "VERSION.txt / MANIFEST.txt" end
+    end
+    if #failed > 0 then return nil, "書けなかった：\n" .. table.concat(failed, "\n"), false end
+    return {copied = #copy, removed = #remove, to = trim(M.read_file(src .. "VERSION.txt"))}
+end
+
 ------------------------------------------------------------------------------ アクション
--- actions.txt（1行に「パス<TAB>説明」）の一覧：{path = "REAPER/…", label = 説明}
-function M.actions(root)
+-- actions.txt：1行に「パス<TAB>説明<TAB>前の名前<TAB>一緒に動かすファイル<TAB>引き継ぐファイル」（後ろの 3 つは , 区切りで、無くてもよい）
+--   前の名前：前に渡したマクロのファイル名（これが別の場所で登録されていたら、このアクションに置き換える）
+--   一緒に動かすファイル：前のマクロのとなりにあれば、前のマクロと一緒に old_macros へ動かす
+--   引き継ぐファイル：前のマクロのとなりにあれば、新しいほうのとなりへ写す（プリセットなど。1つの元につき1回だけ）
+local function split_list(s)
     local out = {}
-    for line in (M.read_file(root .. "actions.txt") or ""):gmatch("[^\r\n]+") do
-        local path, label = line:match("^([^\t]+)\t(.*)$")
-        if path then out[#out + 1] = {path = path, label = label} end
+    for item in (s or ""):gmatch("[^,]+") do
+        local x = trim(item)
+        if x then out[#out + 1] = x end
     end
     return out
 end
 
--- actions.txt のスクリプトをアクションに登録する。もう登録してあれば何も変わらない
+function M.actions(root)
+    local out = {}
+    for line in (M.read_file(root .. "actions.txt") or ""):gmatch("[^\r\n]+") do
+        local f = {}
+        for field in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = field end
+        if f[1] and f[1] ~= "" and f[2] then
+            local names = {[f[1]:match("[^/]+$"):lower()] = true}
+            for _, n in ipairs(split_list(f[3])) do names[n:lower()] = true end
+            out[#out + 1] = {path = f[1], label = f[2], names = names, companions = split_list(f[4]), takeover = split_list(f[5])}
+        end
+    end
+    return out
+end
+
+-- actions.txt のスクリプトをアクションに登録する。もう登録してあれば何も変わらない。
+-- (登録した説明の一覧, 見つからなかったパスの一覧, {フルパス = "RS…"})
 function M.register(root)
-    local done, missing = {}, {}
+    local done, missing, ids = {}, {}, {}
     for _, a in ipairs(M.actions(root)) do
         local full = root .. win(a.path)
         if r.file_exists(full) then
-            r.AddRemoveReaScript(true, 0, full, true)
+            local cmd = r.AddRemoveReaScript(true, 0, full, true)
+            if cmd and cmd ~= 0 then ids[full] = r.ReverseNamedCommandLookup(cmd) end
             done[#done + 1] = string.format("・%s（%s）", a.label, a.path:match("[^/]+$"))
         else
             missing[#missing + 1] = a.path
         end
     end
-    return done, missing
+    return done, missing, ids
 end
 
-function M.unregister(paths)
-    for _, path in ipairs(paths) do r.AddRemoveReaScript(false, 0, path, true) end
-end
-
--- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path = フルパス, name = 小文字のファイル名}
+-- REAPER に登録してあるスクリプト（reaper-kb.ini の SCR の行）：{path, name = 小文字のファイル名, id = "RS…"}
 function M.kb_scripts()
     local res = as_dir(r.GetResourcePath())
     local out = {}
     for line in (M.read_file(res .. "reaper-kb.ini") or ""):gmatch("[^\r\n]+") do
-        local path = line:match('^SCR%s+%d+%s+%d+%s+%S+%s+".-"%s+(.+)$')
+        local id, path = line:match('^SCR%s+%d+%s+%d+%s+(%S+)%s+".-"%s+(.+)$')
         if path then
             path = win(trim(path:gsub('^"(.*)"$', "%1")) or "")
             if not path:match("^%a:\\") and not path:match("^\\\\") then path = res .. "Scripts\\" .. path end  -- Scripts からの相対
-            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower()}
+            out[#out + 1] = {path = path, name = (path:match("[^\\]+$") or ""):lower(), id = id}
         end
     end
     return out
 end
 
--- 入れる場所の外に登録が残っている、同じ名前（か、前に配っていた名前）のスクリプト。今動いているこのファイルは入れない
-function M.old_registrations(root)
-    local names = {}
-    for _, n in ipairs(M.OLD_NAMES) do names[n] = true end
-    for _, a in ipairs(M.actions(root)) do names[a.path:match("[^/]+$"):lower()] = true end
+-- 開発中のフォルダ（git の中）か
+function M.in_git(path)
+    local dir = parent_dir(path)
+    while dir ~= "" and dir:match("\\$") do
+        if r.file_exists(dir .. ".git\\HEAD") or r.file_exists(dir .. ".git") then return true end
+        local up = parent_dir(dir)
+        if up == dir then break end
+        dir = up
+    end
+    return false
+end
+
+-- 置き換える前のマクロ：入れる場所の外に登録してある、同じ名前（か、前の名前）のスクリプト。
+-- {path, id, action, new_path, dev}（dev：開発中のフォルダなので触らない）
+function M.old_macros(root)
+    local by_name = {}
+    for _, a in ipairs(M.actions(root)) do
+        for n in pairs(a.names) do by_name[n] = by_name[n] or a end
+    end
     local out, seen = {}, {}
-    local base, here = root:lower(), (M.HERE .. "XLaben_Update.lua"):lower()
+    local base = root:lower()
     for _, s in ipairs(M.kb_scripts()) do
+        local a = by_name[s.name]
         local low = s.path:lower()
-        if names[s.name] and low:sub(1, #base) ~= base and low ~= here and not seen[low] then
-            seen[low] = true
-            out[#out + 1] = s.path
+        if a and low:sub(1, #base) ~= base and not seen[s.id] then
+            seen[s.id] = true
+            out[#out + 1] = {path = s.path, id = s.id, action = a, new_path = root .. win(a.path), dev = M.in_git(s.path)}
         end
     end
     return out
 end
 
--- 前の EFXUI（別の場所に登録してあるもの）で保存したプリセットを引き継ぐ。引き継いだら元のパス
-function M.import_presets(root, old)
-    for _, path in ipairs(old) do
-        if path:lower():match("xlaben_efx_controller%.lua$") then
-            local src = path:gsub("[^\\]+$", "") .. "xlaben_efx_presets.json"
-            local data = M.read_file(src)
-            if data and #data > 0 and M.write_file(root .. "REAPER\\EFXUI\\xlaben_efx_presets.json", data) then return src end
+-- 前のマクロのとなりにある「引き継ぐファイル」を、新しいほうへ写す（1つの元につき1回だけ。user\taken_over.txt に覚える）。写した元の一覧
+function M.take_over(root, olds)
+    local record = root .. "user\\taken_over.txt"
+    local done = {}
+    for line in (M.read_file(record) or ""):gmatch("[^\r\n]+") do done[line:lower()] = true end
+    local copied = {}
+    for _, o in ipairs(olds) do
+        local from_dir, to_dir = parent_dir(o.path), parent_dir(o.new_path)
+        for _, name in ipairs(o.action.takeover) do
+            local src = from_dir .. win(name)
+            local data = not done[src:lower()] and M.read_file(src)
+            if data and #data > 0 and M.write_file(to_dir .. win(name), data) then
+                done[src:lower()] = true
+                copied[#copied + 1] = src
+                r.RecursiveCreateDirectory(root .. "user", 0)
+                local f = io.open(record, "ab")
+                if f then f:write(src, "\r\n"); f:close() end
+            end
+        end
+    end
+    return copied
+end
+
+-- REAPER を閉じたときにすること（PowerShell に渡す表）：前の登録を新しいファイルに向け直す（ショートカット・ツールバーはそのまま）、
+-- 新しく登録したほうの番号を前の番号に寄せる、前のファイルを old_macros へ動かす
+function M.replace_plan(root, olds, new_ids, stamp)
+    local lines, remapped, moved = {}, {}, {}
+    local backup = root .. "old_macros\\" .. stamp .. "\\"
+    for _, o in ipairs(olds) do
+        lines[#lines + 1] = "repoint\t" .. o.id .. "\t" .. o.new_path
+        local new_id = new_ids[o.new_path]
+        if new_id and new_id ~= o.id and not remapped[new_id] then
+            remapped[new_id] = true
+            lines[#lines + 1] = "remap\t" .. new_id .. "\t" .. o.id
+        end
+        local dir = parent_dir(o.path)
+        local folder = dir:match("([^\\]+)\\$") or "old"
+        local files = {o.path:match("[^\\]+$")}
+        for _, c in ipairs(o.action.companions) do files[#files + 1] = win(c) end
+        for _, f in ipairs(files) do
+            local src = dir .. f
+            if not moved[src:lower()] and src:lower():sub(1, #root) ~= root:lower() and (r.file_exists(src) or o.path == src) then
+                moved[src:lower()] = true
+                lines[#lines + 1] = "move\t" .. src .. "\t" .. backup .. folder .. "\\" .. f
+            end
+        end
+    end
+    return lines, backup
+end
+
+-- 閉じたときに動く PowerShell（ASCII だけで書く。Windows PowerShell 5.1 が BOM の無いファイルを ANSI で読むため）
+M.PS1 = [==[
+param([string]$Data, [string]$Exe)
+$mutex = New-Object System.Threading.Mutex($false, 'Local\XLabenToolsReplaceOnExit')
+if (-not $mutex.WaitOne(0)) { exit 0 }
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+while ($true) {
+  $alive = @(Get-Process -Name reaper -ErrorAction SilentlyContinue | Where-Object { (-not $_.Path) -or ($_.Path -ieq $Exe) })
+  if ($alive.Count -eq 0) { break }
+  Start-Sleep -Milliseconds 500
+}
+Start-Sleep -Milliseconds 800
+if (-not (Test-Path -LiteralPath $Data)) { exit 0 }
+$cfg = @{}; $repoint = @(); $remap = @(); $moves = @()
+foreach ($l in [IO.File]::ReadAllLines($Data, $utf8)) {
+  $f = $l -split "`t"
+  if ($f[0] -eq 'repoint') { $repoint += ,@($f[1], $f[2]) }
+  elseif ($f[0] -eq 'remap') { $remap += ,@($f[1], $f[2]) }
+  elseif ($f[0] -eq 'move') { $moves += ,@($f[1], $f[2]) }
+  elseif ($f.Count -ge 2) { $cfg[$f[0]] = $f[1] }
+}
+function Log($m) { try { [IO.File]::AppendAllText($cfg['log'], (Get-Date -Format 'yyyy-MM-dd HH:mm:ss ') + $m + "`r`n", $utf8) } catch {} }
+function Edit-File($path, $fn) {
+  if (-not (Test-Path -LiteralPath $path)) { return }
+  $text = [IO.File]::ReadAllText($path, $utf8)
+  $nl = "`n"; if ($text.Contains("`r`n")) { $nl = "`r`n" }
+  $out = & $fn ($text -split "`r?`n")
+  [IO.File]::WriteAllText($path, ($out -join $nl), $utf8)
+}
+try {
+  New-Item -ItemType Directory -Force -Path $cfg['backup'] | Out-Null
+  foreach ($k in 'kb', 'menu') { if ($cfg[$k] -and (Test-Path -LiteralPath $cfg[$k])) { Copy-Item -LiteralPath $cfg[$k] -Destination (Join-Path $cfg['backup'] ([IO.Path]::GetFileName($cfg[$k]) + '.bak')) -Force } }
+  Edit-File $cfg['kb'] {
+    param($lines)
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $lines) {
+      $t = $line -split ' ', 5
+      $drop = $false
+      if ($t.Count -ge 5 -and $t[0] -eq 'SCR') {
+        foreach ($p in $repoint) { if ($t[3] -eq $p[0]) { $q = $p[1]; if ($q.Contains(' ')) { $q = '"' + $q + '"' }; $line = 'SCR ' + $t[1] + ' ' + $t[2] + ' ' + $t[3] + ' "Custom: ' + [IO.Path]::GetFileName($p[1]) + '" ' + $q } }
+        foreach ($m in $remap) { if ($t[3] -eq $m[0]) { $drop = $true } }
+      }
+      if (-not $drop) { foreach ($m in $remap) { $line = $line.Replace('_' + $m[0], '_' + $m[1]) }; $out.Add($line) }
+    }
+    ,$out
+  }
+  Edit-File $cfg['menu'] { param($lines) $out = New-Object System.Collections.Generic.List[string]; foreach ($line in $lines) { foreach ($m in $remap) { $line = $line.Replace('_' + $m[0], '_' + $m[1]) }; $out.Add($line) }; ,$out }
+  Log ('replaced on exit: ' + $repoint.Count + ' registrations')
+  foreach ($mv in $moves) {
+    if (Test-Path -LiteralPath $mv[0]) {
+      try { New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($mv[1])) | Out-Null; Move-Item -LiteralPath $mv[0] -Destination $mv[1] -Force; Log ('moved ' + $mv[0]) } catch { Log ('could not move ' + $mv[0] + ': ' + $_) }
+    }
+  }
+  Remove-Item -LiteralPath $Data -Force
+} catch { Log ('replace on exit failed: ' + $_) }
+]==]
+
+-- 閉じたときにすることを書いて、待つ PowerShell を動かす（もう待っているものがあれば、表を書き直すだけ。待つのは1つ）
+function M.schedule(root, lines, backup)
+    local res = as_dir(r.GetResourcePath())
+    local data = root .. "user\\replace_on_exit.tsv"
+    local ps1 = root .. "user\\replace_on_exit.ps1"
+    local head = {"kb\t" .. res .. "reaper-kb.ini", "menu\t" .. res .. "reaper-menu.ini", "backup\t" .. backup,
+                  "log\t" .. root .. "user\\update_log.txt"}
+    for _, l in ipairs(lines) do head[#head + 1] = l end
+    if not (M.write_file(data, table.concat(head, "\r\n") .. "\r\n") and M.write_file(ps1, M.PS1)) then return false end
+    local exe = as_dir(r.GetExePath()) .. "reaper.exe"
+    local cmd = string.format('"%s" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%s" -Data "%s" -Exe "%s"',
+        (os.getenv("SystemRoot") or "C:\\Windows") .. "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", ps1, data, exe)
+    r.ExecProcess(cmd, -1)  -- 待たない
+    return true
+end
+
+-- 前のマクロを置き換える準備をする。{replaced = 置き換えるもの, dev = 触らないもの, copied = 引き継いだファイル}
+function M.replace_old(root, new_ids)
+    local all = M.old_macros(root)
+    local olds, dev = {}, {}
+    for _, o in ipairs(all) do
+        if o.dev then dev[#dev + 1] = o else olds[#olds + 1] = o end
+    end
+    local out = {replaced = olds, dev = dev, copied = {}}
+    if #olds > 0 then
+        out.copied = M.take_over(root, olds)
+        local lines, backup = M.replace_plan(root, olds, new_ids or {}, os.date("%Y%m%d"))
+        out.backup = backup
+        out.scheduled = M.schedule(root, lines, backup)
+    end
+    return out
+end
+
+------------------------------------------------------------------------------ 全部入りの ZIP
+-- XLabenTools…zip を探す（dirs の順に）。見つからなければ nil
+function M.find_zip(dirs)
+    for _, dir in ipairs(dirs) do
+        if dir ~= "" then
+            local d = dir:gsub("\\$", "")
+            r.EnumerateFiles(d, -1)
+            local i = 0
+            while true do
+                local name = r.EnumerateFiles(d, i)
+                if not name then break end
+                if name:lower():match("^xlabentools.*%.zip$") then return as_dir(d) .. name end
+                i = i + 1
+            end
         end
     end
     return nil
 end
 
+-- 全部入りの ZIP から入れる：Python・モデル・MIDIChecker を入れ替え、コードは ZIP のほうが新しいときだけ入れる。うまくいったら ZIP を消す。
+-- 成功：{to, code = コードも入れたか, removed_zip}。だめ：nil, 理由（コードと Python などは前のまま）
+function M.install_zip(root, zip)
+    r.RecursiveCreateDirectory(root, 0)
+    local tmp = root .. "_zip"
+    M.rmdir(tmp)
+    local src, err = M.extract(zip, tmp, 0)  -- 0：終わるまで待つ（数分）
+    if not src then M.rmdir(tmp) return nil, "ZIP を展開できませんでした（空きが足りているかを確かめてください）。\n" .. tostring(err) end
+    if not r.file_exists(src .. "MANIFEST.txt") or not r.file_exists(src .. "A2M\\BASE.txt") then
+        M.rmdir(tmp)
+        return nil, "全部入りの ZIP ではありません：" .. zip
+    end
+    local have, zipver = trim(M.read_file(root .. "VERSION.txt")), trim(M.read_file(src .. "VERSION.txt"))
+    local out = {to = zipver, code = false}
+    if not M.is_install(root) or M.version_gt(zipver, have) then
+        local res, why = M.apply_source(root, src)
+        if not res then M.rmdir(tmp) return nil, why end
+        out.code = true
+    end
+    -- 前のものを全部どけてから、新しいものを入れる（どけられなければ、どけたものを戻して止める）
+    local parked = {}
+    for i, sub in ipairs(M.BASE_DIRS) do
+        if M.dir_has_content(src .. sub) and M.dir_has_content(root .. sub) then
+            local away = tmp .. "\\old_" .. i
+            if not os.rename(root .. sub, away) then
+                for _, p in ipairs(parked) do os.rename(p[2], p[1]) end
+                M.rmdir(tmp)
+                return nil, "使用中のファイルがあって入れ替えられませんでした。AI の下書き・納品チェックを止めて、もう一度実行してください。\n" .. root .. sub
+            end
+            parked[#parked + 1] = {root .. sub, away}
+        end
+    end
+    for _, sub in ipairs(M.BASE_DIRS) do
+        if M.dir_has_content(src .. sub) then
+            r.RecursiveCreateDirectory(parent_dir(root .. sub), 0)
+            if not os.rename(src .. sub, root .. sub) then
+                M.rmdir(tmp)
+                return nil, "入れられませんでした：" .. root .. sub
+            end
+        end
+    end
+    M.write_file(root .. "A2M\\BASE.txt", M.read_file(src .. "A2M\\BASE.txt"))
+    M.rmdir(tmp)
+    out.removed_zip = os.remove(zip) and true or false
+    return out
+end
+
 ------------------------------------------------------------------------------ 知らせること
--- AI の下書きの土台（Python・モデル。全部入りの ZIP にだけ入っている）：("ok" / "none" / "old" / "unused", 知らせる文)
+-- AI の下書きの土台（Python・モデル・MIDIChecker。全部入りの ZIP から入る）：("ok" / "none" / "old" / "unused", 知らせる文)
 function M.base_state(root)
     local need = trim(M.read_file(root .. "A2M\\BASE_REQUIRED.txt"))
     if not need then return "unused", nil end
     local have = trim(M.read_file(root .. "A2M\\BASE.txt"))
+    local how = "全部入りの ZIP（XLabenTools_…_full.zip）を、入れた場所の XLabenTools フォルダにそのまま置いて（「フォルダを開く」で開ける）、\n" ..
+        "もう一度「XLaben_Update」を実行してください。自動で入って、ZIP は消えます。"
     if not have then
-        return "none", "AI の下書きを使うには、全部入りの ZIP（Python とモデル入り）の中身を、入れた場所のフォルダに上書きで展開してください\n" ..
-            "（「フォルダを開く」で開ける。ZIP の中の XLabenTools フォルダの中身を、そのフォルダに入れる）。\n" ..
-            "ミキサー・EFX・ドラム・再生は、このままで使えます。"
+        return "none", "AI の下書きと納品チェックを使うには、Python・モデル・MIDIChecker が要ります。\n" .. how ..
+            "\nミキサー・EFX・ドラム・再生・オートストラマーは、このままで使えます。"
     end
     if have ~= need then
-        return "old", "AI の下書きの土台（Python・モデル）が古いです。新しい全部入りの ZIP をもらって、入れた場所のフォルダに上書きで展開し、\n" ..
-            "もう一度「更新する」を押してください。ミキサー・EFX・ドラム・再生は、このままで使えます。"
+        return "old", "AI の下書きの土台（Python・モデル・MIDIChecker）が古いです。新しい全部入りの ZIP が要ります。\n" .. how
     end
     return "ok", nil
 end
@@ -346,11 +620,26 @@ local function log(root, fmt, ...)
         f:close()
     end
 end
+M.log = log
 
 local FIRST_TIME = "■ 初めての人がやること\n" ..
     "・アクションリストで「XLaben」を探して、ショートカットを割り当てる（再生・停止の XLaben_Play.lua は Space に）。\n" ..
+    "　前のマクロ（EFXUI・ドラム・ミキサーなど）に割り当てていたショートカットは、REAPER を開き直すとそのまま新しいほうで動きます。\n" ..
     "・REAPER の設定：オプション → 設定 → オーディオ →「停止中も FX を動かす（Run FX when stopped）」をオン。\n" ..
     "・使い方は、入れた場所の README.txt（「フォルダを開く」で開ける）。"
+
+-- 置き換えの知らせ
+function M.replace_text(rep)
+    if #rep.replaced == 0 then return nil end
+    local lines = {"■ 前のマクロを置き換えます", "次のマクロは、REAPER を閉じたときに新しいものに置き換わります。" ..
+        "ショートカットとツールバーのボタンは、そのまま新しいほうで動きます。"}
+    for _, o in ipairs(rep.replaced) do lines[#lines + 1] = "・" .. o.path .. " → " .. o.action.label end
+    lines[#lines + 1] = "前のファイルは " .. (rep.backup or "") .. " に移します（消しません）。"
+    for _, c in ipairs(rep.copied) do lines[#lines + 1] = "引き継いだ設定・プリセット：" .. c end
+    if not rep.scheduled then lines[#lines + 1] = "（置き換えの準備ができませんでした。user フォルダに書けるかを確かめてください）" end
+    lines[#lines + 1] = "→ REAPER を閉じて、開き直してください。"
+    return table.concat(lines, "\n")
+end
 
 ------------------------------------------------------------------------------ 入れる・更新する
 -- 結果の表を返す：status = "installed" / "updated" / "latest" / "offline" / "failed"、text = 見せる文
@@ -361,24 +650,17 @@ function M.run(root)
     for _, a in ipairs(M.actions(root)) do before[a.path] = true end
     local function finish(status, parts)
         res.status = status
-        local done, missing = {}, {}
-        if status ~= "failed" then done, missing = M.register(root) end
+        local done, missing, ids = {}, {}, {}
+        if status ~= "failed" then done, missing, ids = M.register(root) end
         res.registered, res.missing = #done, missing
         if #missing > 0 then parts[#parts + 1] = "見つからなかったスクリプト：\n" .. table.concat(missing, "\n") end
         if status ~= "failed" and M.is_install(root) then
             M.set_root(root)
-            res.old = M.old_registrations(root)
-            if status == "installed" then
-                res.presets_from = M.import_presets(root, res.old)
-                if res.presets_from then parts[#parts + 1] = "前の EFXUI で保存したプリセットを引き継ぎました：\n" .. res.presets_from end
-            end
-            if #res.old > 0 then
-                parts[#parts + 1] = "■ 前の版のマクロ\n別の場所のマクロが、まだ REAPER に登録されています（ショートカットは前のマクロを指したままです）：\n" ..
-                    table.concat(res.old, "\n") .. "\n「前の版の登録を外す」を押すと登録だけ外します（ファイルは消しません）。" ..
-                    "そのあと、新しいアクションにショートカットを割り当ててください。"
-            end
+            res.replace = M.replace_old(root, ids)
+            local t = M.replace_text(res.replace)
+            if t then parts[#parts + 1] = t end
             res.base_note = M.base_note(root)
-            if res.base_note then parts[#parts + 1] = "■ AI の下書き\n" .. res.base_note end
+            if res.base_note then parts[#parts + 1] = "■ AI の下書き・納品チェック\n" .. res.base_note end
         end
         if status == "installed" then parts[#parts + 1] = FIRST_TIME end
         res.text = table.concat(parts, "\n\n")
@@ -402,49 +684,28 @@ function M.run(root)
     end
     res.to = latest
     if latest == res.from then return finish("latest", {"最新です（版 " .. latest .. "）。"}) end
-    -- 2. 取ってきて、中身を確かめる（ここまでは何も書き換えない）
+    -- 2. 取ってきて、入れ替える（中身が一覧と違えば、何も書き換えない）
     local tmp = M.tmp_dir()
     M.rmdir(tmp)
     r.RecursiveCreateDirectory(tmp, 0)
-    local src
-    local ok
+    local src, ok, applied, untouched
     ok, err = M.curl(M.zip_url(), tmp .. "\\pkg.zip", nil, root)
     if ok then src, err = M.extract(tmp .. "\\pkg.zip", tmp .. "\\x") end
-    local new_list, copy, remove, data
-    if src then
-        local manifest = M.read_file(src .. "MANIFEST.txt")
-        if not manifest then err = "ダウンロードした中に MANIFEST.txt がありません" else new_list, err = M.parse_manifest(manifest) end
-    end
-    if new_list then
-        -- 今入っている版の一覧（無い・読めないときは、消すものは無しにする）
-        local old_list, old_set = M.parse_manifest(M.read_file(root .. "MANIFEST.txt") or "")
-        if not old_list then old_set = nil end
-        copy, remove = M.plan(old_set, new_list, function(path) return r.file_exists(root .. win(path)) end)
-        data, err = M.load_release(src, copy)
-    end
-    if not data then
-        M.rmdir(tmp)
+    if src then applied, err, untouched = M.apply_source(root, src) end
+    M.rmdir(tmp)
+    if not applied then
         res.error = err
+        if src and untouched == false then
+            return finish("failed", {"書けないファイルがありました。開いているツール（ミキサー・EFX・ドラム）と AI の下書きを止めて、もう一度押してください。\n\n" ..
+                tostring(err)})
+        end
         return finish("failed", {"更新できませんでした（何も書き換えていません。今の版のまま使えます）。\n\n" .. tostring(err)})
     end
-    -- 3. 入れ替える。版の番号と一覧は最後に書く（途中で止まっても、もう一度押せばやり直せる）
-    local failed = M.apply(root, copy, data, remove)
-    if #failed == 0 then
-        local a = M.write_file(root .. "MANIFEST.txt", M.read_file(src .. "MANIFEST.txt"))
-        local b = M.write_file(root .. "VERSION.txt", M.read_file(src .. "VERSION.txt") or (latest .. "\n"))
-        if not (a and b) then failed[#failed + 1] = "VERSION.txt / MANIFEST.txt" end
-    end
-    res.to = trim(M.read_file(src .. "VERSION.txt")) or latest
-    M.rmdir(tmp)
-    res.copied, res.removed = #copy, #remove
-    if #failed > 0 then
-        res.error = "書けなかった：" .. table.concat(failed, ", ")
-        return finish("failed", {"書けないファイルがありました。開いているツール（ミキサー・EFX・ドラム）と AI の下書きを止めて、もう一度押してください。\n\n" ..
-            table.concat(failed, "\n")})
-    end
+    res.to = applied.to or latest
+    res.copied, res.removed = applied.copied, applied.removed
     local parts = {}
     local head = res.from and string.format("更新しました：%s → %s", res.from, res.to) or ("入れました（版 " .. res.to .. "）")
-    parts[#parts + 1] = head .. string.format("\n場所：%s\n（%d ファイルを入れ替え、%d ファイルを消しました）", root, #copy, #remove)
+    parts[#parts + 1] = head .. string.format("\n場所：%s\n（%d ファイルを入れ替え、%d ファイルを消しました）", root, res.copied, res.removed)
     local changes, todo = M.news(root, res.from)
     -- 増えたアクション（更新のときだけ。初めてのときは、下の「初めての人がやること」に書いてある）
     res.new_actions = {}
@@ -468,6 +729,22 @@ function M.run(root)
     return finish(res.from and "updated" or "installed", parts)
 end
 
+-- 全部入りの ZIP から入れてから、GitHub の新しい版を確かめる
+function M.run_zip(root, zip)
+    local z, err = M.install_zip(root, zip)
+    if not z then
+        log(root, "zip failed %s", tostring(err))
+        return {status = "failed", text = "全部入りの ZIP から入れられませんでした（ZIP は残してあります）。\n\n" .. tostring(err), root = root}
+    end
+    log(root, "zip %s code=%s", tostring(z.to), tostring(z.code))
+    local res = M.run(root)
+    local head = "全部入りの ZIP（版 " .. tostring(z.to) .. "）から、Python・モデル・MIDIChecker を入れました。" ..
+        (z.removed_zip and "ZIP は消しました。" or "ZIP を消せませんでした（手で消してください）。")
+    res.zip = z
+    res.text = head .. "\n\n" .. res.text
+    return res
+end
+
 ------------------------------------------------------------------------------ 場所を変える
 -- 選んだフォルダから、入れる場所を決める：選んだフォルダの中に XLabenTools を作る（選んだフォルダが XLabenTools ならそこ）
 function M.root_in(picked)
@@ -486,12 +763,7 @@ function M.move(old_root, new_root)
         M.set_root(new_root)
         return true, "入れる場所を変えました：\n" .. new_root
     end
-    r.EnumerateFiles(new_root, -1)
-    r.EnumerateSubdirectories(new_root, -1)
-    if r.EnumerateFiles(new_root, 0) or r.EnumerateSubdirectories(new_root, 0) then
-        return false, "移す先のフォルダが空ではありません：\n" .. new_root
-    end
-    local actions = M.actions(old_root)
+    if M.dir_has_content(new_root) then return false, "移す先のフォルダが空ではありません：\n" .. new_root end
     local from, to = old_root:gsub("\\$", ""), new_root:gsub("\\$", "")
     r.RecursiveCreateDirectory(to:match("^(.*)\\[^\\]+$") or to, 0)
     M.rmdir(to)  -- 空のフォルダがあれば消す（名前を変えて移すため。空なのは上で確かめた）
@@ -508,15 +780,15 @@ function M.move(old_root, new_root)
         end
         M.rmdir(from)
     end
-    local old_paths = {}
-    for _, a in ipairs(actions) do old_paths[#old_paths + 1] = old_root .. win(a.path) end
-    M.unregister(old_paths)
-    M.register(new_root)
     M.set_root(new_root)
+    -- 新しい場所で登録し、前の場所の登録（ショートカット付き）は、REAPER を閉じたときに新しい場所へ向け直す
+    local _, _, ids = M.register(new_root)
+    local rep = M.replace_old(new_root, ids)
     log(new_root, "moved %s -> %s", old_root, new_root)
-    return true, "移しました：\n" .. new_root .. "\n\nアクションは新しい場所で登録し直しました。\n" ..
-        "■ やること\n・ショートカットを割り当て直してください（REAPER は場所ごとに別のアクションとして覚えるため）。\n" ..
-        "・REAPER を一度閉じて開き直してください。"
+    return true, "移しました：\n" .. new_root ..
+        "\n\nREAPER を閉じて開き直すと、ショートカットとツールバーのボタンも、そのまま新しい場所のマクロで動きます" ..
+        (rep.scheduled and "。" or "（準備ができませんでした。ショートカットを割り当て直してください）。") ..
+        "\n開き直すまでは、アクションリストから実行してください。"
 end
 
 -- フォルダを選んでもらう。選ばなければ nil。（js_ReaScriptAPI があれば選ぶ画面、無ければパスを入力）
@@ -592,7 +864,11 @@ end
 local function refresh()
     ui.have = trim(M.read_file(ui.root .. "VERSION.txt"))
     ui.base = M.base_state(ui.root)
-    ui.old = M.is_install(ui.root) and M.old_registrations(ui.root) or {}
+    ui.zip = M.find_zip({ui.root, M.HERE ~= ui.root and M.HERE or ""})
+    ui.olds = 0
+    if M.is_install(ui.root) then
+        for _, o in ipairs(M.old_macros(ui.root)) do if not o.dev then ui.olds = ui.olds + 1 end end
+    end
 end
 
 local function do_pending()
@@ -601,8 +877,10 @@ local function do_pending()
     if what == "check" then
         refresh()
         ui.latest, ui.latest_err = M.latest_version(ui.root)
-    elseif what == "run" then
-        local res = M.run(ui.root)
+        -- 入れた場所に全部入りの ZIP が置いてあれば、そのまま入れる
+        if ui.zip and M.is_install(ui.root) then ui.pending = "zip" end
+    elseif what == "run" or what == "zip" then
+        local res = (ui.zip and (what == "zip" or not M.is_install(ui.root))) and M.run_zip(ui.root, ui.zip) or M.run(ui.root)
         ui.message, ui.scroll = res.text, 0
         if res.to then ui.latest, ui.latest_err = res.to, nil end
         refresh()
@@ -612,7 +890,7 @@ local function do_pending()
             local new_root = M.root_in(picked)
             local installed = M.is_install(ui.root)
             local ask = installed and ("フォルダごと、次の場所へ移します。\n\n" .. new_root ..
-                "\n\nアクションは新しい場所で登録し直します。ショートカットは割り当て直しになります。\n" ..
+                "\n\nショートカットは、REAPER を開き直すとそのまま新しい場所で動きます。\n" ..
                 "（AI の下書きの Python とモデルも一緒に移します。別のドライブへは数分かかります）") or ("次の場所に入れます。\n\n" .. new_root)
             if r.ShowMessageBox(ask, M.TITLE, 1) == 1 then
                 local ok, msg = M.move(ui.root, new_root)
@@ -621,13 +899,6 @@ local function do_pending()
                 refresh()
             end
         end
-    elseif what == "old" then
-        local ask = "次のマクロの登録を外します（ファイルは消しません。割り当てていたショートカットも外れます）。\n\n" .. table.concat(ui.old, "\n")
-        if r.ShowMessageBox(ask, M.TITLE, 1) == 1 then
-            M.unregister(ui.old)
-            ui.message, ui.scroll = "前の版の登録を外しました。アクションリストで「XLaben」を探して、新しいアクションにショートカットを割り当ててください。", 0
-            refresh()
-        end
     elseif what == "open" then
         r.RecursiveCreateDirectory(ui.root, 0)
         r.ExecProcess(string.format('"%s" "%s"', (os.getenv("SystemRoot") or "C:\\Windows") .. "\\explorer.exe", (ui.root:gsub("\\$", ""))), -1)
@@ -635,6 +906,7 @@ local function do_pending()
 end
 
 local BUSY = {check = "新しい版があるかを確かめています…", run = "ダウンロードして入れ替えています…（少し待つ）",
+              zip = "全部入りの ZIP を展開して入れています…（数分。その間 REAPER は止まって見えます）",
               move = "場所を変えています…（Python とモデルがあると数分かかる）"}
 
 local function frame()
@@ -650,7 +922,7 @@ local function frame()
     y = y + 34
     local installed = M.is_install(ui.root)
     local label
-    if not installed then label = "インストールする"
+    if not installed then label = ui.zip and "ZIP からインストールする" or "インストールする"
     elseif ui.latest and ui.latest ~= ui.have then label = "更新する（" .. ui.latest .. "）"
     else label = "更新を確かめる" end
     -- 版
@@ -676,9 +948,11 @@ local function frame()
         y = y + ROW
     end
     text_at("AI の下書き", x, y, C.dim)
-    local base = {ok = {"使えます（Python とモデルあり）", C.ok}, none = {"Python とモデルがまだありません（全部入りの ZIP が要る）", C.dim},
-                  old = {"Python とモデルが古い（新しい全部入りの ZIP が要る）", C.warn}, unused = {"—", C.dim}}
+    local base = {ok = {"使えます（Python・モデル・MIDIChecker あり）", C.ok},
+                  none = {"Python・モデルがまだありません（全部入りの ZIP をこのフォルダに置く）", C.dim},
+                  old = {"Python・モデルが古い（新しい全部入りの ZIP をこのフォルダに置く）", C.warn}, unused = {"—", C.dim}}
     local b = base[installed and ui.base or "unused"] or base.unused
+    if ui.zip then b = {"全部入りの ZIP を見つけました：" .. (ui.zip:match("[^\\]+$") or ""), C.accent} end
     text_at(b[1], x + 110, y, b[2])
     y = y + ROW + 8
     -- ボタン
@@ -687,10 +961,9 @@ local function frame()
     if button("場所を変える", x + 262, y, 130, 36, not busy) then ui.pending = "move" end
     if button("フォルダを開く", x + 404, y, 130, 36, not busy) then ui.pending = "open" end
     y = y + 46
-    if #(ui.old or {}) > 0 then
-        text_at(string.format("前の版のマクロが %d 個、別の場所で登録されたままです", #ui.old), x, y + 6, C.warn)
-        if button("前の版の登録を外す", x + w - 190, y, 190, 28, not busy) then ui.pending = "old" end
-        y = y + 38
+    if (ui.olds or 0) > 0 then
+        text_at(string.format("前のマクロが %d 個あります。REAPER を閉じると新しいものに置き換わります（ショートカットはそのまま）", ui.olds), x, y, C.warn)
+        y = y + ROW
     end
     color(C.line)
     gfx.line(x, y, x + w, y)

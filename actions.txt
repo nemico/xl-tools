@@ -1,7 +1,9 @@
-REAPER/XLabenMixer/XLaben_Mixer.lua	ミキサー
-REAPER/XLabenMixer/XLaben_Play.lua	再生・停止（Space に割り当てる）
-REAPER/XLabenMixer/XLaben_Sync.lua	先に送っておく（ミキサー・Space で自動で起動する）
-REAPER/EFXUI/xlaben_efx_controller.lua	EFX
-REAPER/DrumReapermacro/XLaben_Drum.lua	ドラム
-A2M/scripts/ai_build_project.lua	AI でプロジェクトを作る（下書き）
-XLaben_Update.lua	インストール・更新
+REAPER/XLabenMixer/XLaben_Mixer.lua	ミキサー	X-LabenMixer.lua		
+REAPER/XLabenMixer/XLaben_Play.lua	再生・停止（Space に割り当てる）			
+REAPER/XLabenMixer/XLaben_Sync.lua	先に送っておく（ミキサー・Space で自動で起動する）			
+REAPER/EFXUI/xlaben_efx_controller.lua	EFX	efx_controller.lua	xlaben_efx_data.json,xlaben_efx_presets.json,xlaben_system_effects.json	xlaben_efx_presets.json
+REAPER/DrumReapermacro/XLaben_Drum.lua	ドラム	SC_Drum_Macro.lua	drum_mapping.json	
+REAPER/AutoStrummer/StrumEditor_V2.lua	オートストラマー		AutoStrummer_presets.lua,AutoStrummer_settings.lua,StrumEditor_log.txt	AutoStrummer_presets.lua,AutoStrummer_settings.lua
+A2M/scripts/ai_build_project.lua	AI でプロジェクトを作る（下書き）			
+A2M/scripts/delivery_check.lua	納品チェック（R02Checker。全部入りの ZIP が要る）			
+XLaben_Update.lua	インストール・更新			

@@ -98,10 +98,14 @@
 13	-	A2M/BASE_REQUIRED.txt
 26172	-	A2M/config.yaml
 28583	-	A2M/scripts/ai_build_project.lua
+21243	-	A2M/scripts/delivery_check.lua
 6056	-	A2M/scripts/reaper_backend.py
-458	-	actions.txt
-1306	-	CHANGES.txt
-5289	-	README.txt
+929	-	actions.txt
+2207	-	CHANGES.txt
+5579	-	README.txt
+600	keep	REAPER/AutoStrummer/AutoStrummer_presets.lua
+38	keep	REAPER/AutoStrummer/AutoStrummer_settings.lua
+58317	-	REAPER/AutoStrummer/StrumEditor_V2.lua
 160526	-	REAPER/DrumReapermacro/data/drum_names.lua
 16189	-	REAPER/DrumReapermacro/lib/drum_block.lua
 10242	-	REAPER/DrumReapermacro/lib/drum_io.lua
@@ -133,4 +137,4 @@
 39786	-	REAPER/XLabenMixer/XLaben_Mixer.lua
 2628	-	REAPER/XLabenMixer/XLaben_Play.lua
 1703	-	REAPER/XLabenMixer/XLaben_Sync.lua
-37439	-	XLaben_Update.lua
+52455	-	XLaben_Update.lua
